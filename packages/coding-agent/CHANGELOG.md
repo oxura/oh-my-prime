@@ -7,6 +7,7 @@
 - Added ProofTree exploration with strategy-diverse agents in isolated session workspaces, independent contract verification, deterministic winner selection, recovery, and verifier-gated promotion.
 - Added semantic Model Mesh routes with capability filtering, per-child effort, authenticated model metadata, verifier-backed adaptive routing, and durable policy overrides.
 - Added fail-closed maker/checker routing that excludes the maker model and, by default, its entire provider.
+- Added Code Atlas, a content-addressed SQLite graph of files, symbols, calls, references, imports, inheritance, and parser diagnostics for Python and TypeScript/JavaScript repositories.
 - Added a configurable copy action to login dialogs so raw sign-in URLs can be copied without selecting wrapped text ([#643](https://github.com/PrimeIntellect-ai/prime-agent/issues/643)).
 - Added privacy-safe pseudonymous product analytics for onboarding, command use, execution modes, run outcomes, TTFT, latency, usage, tools, retries, and compactions, with disclosure and opt-out controls ([ENG-4682](https://linear.app/primeintellect/issue/ENG-4682/add-privacy-safe-posthog-analytics-to-prime-agent)).
 - Changed sent agent messages in the IPython cell UI to show only the message text with a `╰─` gutter when expanded, matching received messages, and hid the raw `agent_message.send` receipt dictionary.
