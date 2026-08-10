@@ -101,6 +101,7 @@ class CodeAtlasTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats.head_commit, self._git("rev-parse", "HEAD"))
 
         service_run = await self.atlas.symbol("Service.run", repo=self.repo)
+        self.assertTrue(service_run.exported)
         calls = await self.atlas.outgoing(service_run, kinds=("calls",), repo=self.repo)
         self.assertTrue(any(edge.target_name == "helper" for edge in calls))
         target_key = next(
@@ -117,6 +118,7 @@ class CodeAtlasTest(unittest.IsolatedAsyncioTestCase):
         )
 
         worker_run = await self.atlas.symbol("Worker.run", repo=self.repo)
+        self.assertTrue(worker_run.exported)
         python_calls = await self.atlas.outgoing(
             worker_run, kinds=("calls",), repo=self.repo
         )

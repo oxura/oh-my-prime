@@ -95,6 +95,24 @@ function hasExportModifier(node) {
 	return Boolean(owner?.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword));
 }
 
+function isExternallyVisible(node) {
+	const owner = ts.isVariableDeclaration(node) ? node.parent?.parent : node;
+	if (owner?.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.PrivateKeyword)) return false;
+	if (hasExportModifier(node)) return true;
+	const parent = node.parent;
+	if (
+		parent &&
+		(ts.isClassDeclaration(parent) ||
+			ts.isClassExpression(parent) ||
+			ts.isInterfaceDeclaration(parent) ||
+			ts.isTypeLiteralNode(parent))
+	) {
+		return isExternallyVisible(parent);
+	}
+	if (parent && ts.isSourceFile(parent)) return !ts.isExternalModule(parent);
+	return false;
+}
+
 function signatureText(node, sourceFile) {
 	const body = node.body;
 	const end = body ? body.getStart(sourceFile, false) : node.getEnd();
@@ -117,7 +135,7 @@ function emitDeclaration(node, sourceFile) {
 			qualified_name: qualifiedName(node, name),
 			start_line: lineOf(sourceFile, node),
 			end_line: sourceFile.getLineAndCharacterOfPosition(node.getEnd()).line + 1,
-			exported: hasExportModifier(node),
+			exported: isExternallyVisible(node),
 			signature: signatureText(node, sourceFile),
 		});
 	}

@@ -87,6 +87,40 @@ Compilation checks the indexed commit and content hashes first. By default,
 stale tracked sources trigger an automatic graph rebuild. Pass
 `auto_refresh=False` when a stale graph must fail closed instead.
 
+## Impact Analysis and hash-gated patches
+
+Analyze the exact unified diff before editing the worktree:
+
+```python
+report = await atlas.impact(proposed_diff, max_depth=3)
+print(report.render())
+
+await atlas.require_fresh_impact(report)
+result = await atlas.apply_impact(report)
+```
+
+Impact Analysis validates that the patch applies, maps old-side hunk ranges to
+changed declarations, and traverses incoming calls, references, inheritance,
+and file/import edges. Reports separate:
+
+- directly changed and transitively impacted symbols;
+- touched public API declarations;
+- affected source, test, documentation, configuration, and migration files;
+- unresolved static targets and explicit analysis limitations;
+- a deterministic risk score derived from API surface, dependents, deletions,
+  missing connected tests, migrations, configuration, and unresolved targets.
+
+The report and exact patch are persisted atomically and content-attested.
+`impact_freshness()` checks the repository HEAD, Atlas snapshot, every target
+file hash, and patch applicability. `apply_impact()` repeats those checks under
+a repository-scoped lock immediately before `git apply`, then records resulting
+content hashes. A stale report fails without writing.
+
+Only text patches are admitted. Binary, symlink, and submodule patches are
+rejected. Static impact is evidence, not proof of reflective, generated,
+data-driven, or runtime-only dependencies; those limitations remain visible in
+the report.
+
 ## Persistence and correctness
 
 The graph is stored outside the repository in a repository-keyed SQLite
@@ -113,6 +147,11 @@ those bytes change again.
 - `await atlas.compile_context(task, contract=..., roots=..., paths=...)`
 - `await atlas.load_capsule(capsule_id)`
 - `await atlas.capsule_freshness(capsule)`
+- `await atlas.impact(proposed_diff, max_depth=3)`
+- `await atlas.load_impact(report_id)`
+- `await atlas.impact_freshness(report)`
+- `await atlas.require_fresh_impact(report)`
+- `await atlas.apply_impact(report)`
 
 Build or refresh the graph before relying on direct graph queries for a
 load-bearing refactor. `compile_context()` performs that freshness check

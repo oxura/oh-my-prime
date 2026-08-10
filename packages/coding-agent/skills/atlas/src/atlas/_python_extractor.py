@@ -32,6 +32,7 @@ def parse_python(path: str, source: str) -> ParsedPython:
         node: ast.AST,
         parents: tuple[str, ...] = (),
         parent_kind: str | None = None,
+        parent_exported: bool = False,
     ) -> None:
         name: str | None = None
         kind: str | None = None
@@ -47,6 +48,9 @@ def parse_python(path: str, source: str) -> ParsedPython:
             bases = ", ".join(ast.unparse(base) for base in node.bases)
             signature = f"class {name}({bases})" if bases else f"class {name}"
         if name and kind:
+            exported = not name.startswith("_") and (
+                not parents or (parent_kind == "class" and parent_exported)
+            )
             qualified_name = ".".join((*parents, name))
             key = f"{path}:{node.lineno}:{kind}:{qualified_name}"
             node_keys[id(node)] = key
@@ -61,17 +65,19 @@ def parse_python(path: str, source: str) -> ParsedPython:
                     "qualified_name": qualified_name,
                     "start_line": node.lineno,
                     "end_line": getattr(node, "end_lineno", node.lineno),
-                    "exported": len(parents) == 0 and not name.startswith("_"),
+                    "exported": exported,
                     "signature_hash": _signature_hash(signature),
                 }
             )
             next_parents = (*parents, name)
             next_parent_kind = kind
+            next_parent_exported = exported
         else:
             next_parents = parents
             next_parent_kind = parent_kind
+            next_parent_exported = parent_exported
         for child in ast.iter_child_nodes(node):
-            collect(child, next_parents, next_parent_kind)
+            collect(child, next_parents, next_parent_kind, next_parent_exported)
 
     collect(tree)
 
@@ -138,8 +144,12 @@ def parse_python(path: str, source: str) -> ParsedPython:
                 self.edge(node, "imports", alias.name, confidence=0.8)
 
         def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-            module = "." * node.level + (node.module or "")
-            self.edge(node, "imports", module, confidence=0.8)
+            prefix = "." * node.level
+            if node.module:
+                self.edge(node, "imports", f"{prefix}{node.module}", confidence=0.8)
+                return
+            for alias in node.names:
+                self.edge(node, "imports", f"{prefix}{alias.name}", confidence=0.8)
 
         def visit_Call(self, node: ast.Call) -> None:
             name = ast.unparse(node.func)

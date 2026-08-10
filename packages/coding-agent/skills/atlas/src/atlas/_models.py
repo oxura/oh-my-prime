@@ -24,6 +24,14 @@ class CapsuleError(AtlasError):
     """Raised when context compilation or capsule validation fails."""
 
 
+class ImpactError(AtlasError):
+    """Raised when a proposed change cannot be analyzed or attested."""
+
+
+class ImpactStale(ImpactError):
+    """Raised when an impact report no longer matches its repository snapshot."""
+
+
 @dataclass(frozen=True, slots=True)
 class FileNode:
     id: int
@@ -175,3 +183,112 @@ class CapsuleFreshness:
     changed_files: tuple[str, ...]
     missing_files: tuple[str, ...]
     graph_changed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ChangedRange:
+    old_start: int
+    old_count: int
+    new_start: int
+    new_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class ChangedFile:
+    path: str
+    old_path: str | None
+    status: Literal["modified", "added", "deleted", "renamed"]
+    additions: int
+    deletions: int
+    ranges: tuple[ChangedRange, ...]
+    base_hash: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ImpactSymbol:
+    key: str
+    file: str
+    kind: str
+    name: str
+    qualified_name: str
+    line: int
+    exported: bool
+    depth: int
+    relation: str
+    confidence: float
+
+
+@dataclass(frozen=True, slots=True)
+class ImpactFile:
+    path: str
+    depth: int
+    categories: tuple[str, ...]
+    reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ImpactReport:
+    schema_version: int
+    id: str
+    repo_root: Path
+    common_dir: Path
+    indexed_head: str
+    graph_indexed_at: str
+    patch_sha256: str
+    patch_path: Path
+    changes: tuple[ChangedFile, ...]
+    changed_symbols: tuple[ImpactSymbol, ...]
+    impacted_symbols: tuple[ImpactSymbol, ...]
+    impacted_files: tuple[ImpactFile, ...]
+    tests: tuple[str, ...]
+    docs: tuple[str, ...]
+    configs: tuple[str, ...]
+    migrations: tuple[str, ...]
+    public_api_symbols: tuple[str, ...]
+    unresolved_targets: tuple[str, ...]
+    risk_score: int
+    risk_level: Literal["low", "medium", "high", "critical"]
+    limitations: tuple[str, ...]
+    created_at: str
+
+    def render(self) -> str:
+        changed = "\n".join(
+            f"- `{item.path}` ({item.status}, +{item.additions}/-{item.deletions})"
+            for item in self.changes
+        )
+        dependents = "\n".join(
+            f"- `{item.path}`: {', '.join(item.reasons)}"
+            for item in self.impacted_files
+        )
+        public = ", ".join(f"`{name}`" for name in self.public_api_symbols) or "none"
+        tests = ", ".join(f"`{path}`" for path in self.tests) or "none discovered"
+        limitations = "\n".join(f"- {item}" for item in self.limitations) or "- none"
+        return (
+            f"# Impact report `{self.id}`\n\n"
+            f"Risk: **{self.risk_level}** ({self.risk_score}/100)  \n"
+            f"Indexed HEAD: `{self.indexed_head}`  \n"
+            f"Patch SHA-256: `{self.patch_sha256}`\n\n"
+            f"## Proposed changes\n\n{changed}\n\n"
+            f"## Public symbols touched\n\n{public}\n\n"
+            f"## Affected files\n\n{dependents}\n\n"
+            f"## Discovered tests\n\n{tests}\n\n"
+            f"## Limitations\n\n{limitations}\n"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ImpactFreshness:
+    fresh: bool
+    head_changed: bool
+    graph_changed: bool
+    changed_files: tuple[str, ...]
+    patch_applies: bool
+    reason: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ImpactApplyResult:
+    report_id: str
+    applied_files: tuple[str, ...]
+    content_hashes: dict[str, str | None]
+    applied_at: str

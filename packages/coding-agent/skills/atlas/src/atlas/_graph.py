@@ -8,7 +8,7 @@ import sqlite3
 import tempfile
 from collections.abc import Sequence
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from ._fallback_extractor import parse_typescript_fallback
 from ._models import (
@@ -573,18 +573,38 @@ class CodeAtlas:
     def _resolve_python_imports(
         edges: list[dict[str, object]], files: tuple[str, ...]
     ) -> None:
-        python_files = [path for path in files if path.endswith(".py")]
+        python_files = {path for path in files if path.endswith(".py")}
         for edge in edges:
             if edge.get("kind") != "imports" or edge.get("target_file"):
                 continue
             target = edge.get("target_name")
-            if not isinstance(target, str):
+            source = edge.get("source_file")
+            if not isinstance(target, str) or not isinstance(source, str):
                 continue
-            suffix = target.lstrip(".").replace(".", "/")
-            endings = (f"/{suffix}.py", f"/{suffix}/__init__.py")
-            matches = [path for path in python_files if f"/{path}".endswith(endings)]
+            matches: set[str] = set()
+            if target.startswith("."):
+                level = len(target) - len(target.lstrip("."))
+                module = target[level:].replace(".", "/")
+                base = PurePosixPath(source).parent
+                for _ in range(level - 1):
+                    base = base.parent
+                stem = base / module if module else base
+                matches.update(
+                    candidate
+                    for candidate in (
+                        f"{stem.as_posix()}.py",
+                        f"{stem.as_posix()}/__init__.py",
+                    )
+                    if candidate in python_files
+                )
+            else:
+                suffix = target.replace(".", "/")
+                endings = (f"/{suffix}.py", f"/{suffix}/__init__.py")
+                matches.update(
+                    path for path in python_files if f"/{path}".endswith(endings)
+                )
             if len(matches) == 1:
-                edge["target_file"] = matches[0]
+                edge["target_file"] = matches.pop()
                 edge["confidence"] = 1.0
 
     @staticmethod
