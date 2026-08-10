@@ -53,6 +53,7 @@ class FakeRlm:
             session_dir=cwd.parent / f"session-{index}",
             model=str(kwargs.get("model") or "fake/model"),
             cwd=cwd,
+            effort=str(kwargs.get("effort") or "off"),
         )
 
     async def list_subagents(self):

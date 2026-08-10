@@ -7,7 +7,7 @@ import sys
 import types
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from .harness import HarnessEntry, HarnessScope, HarnessState, RefinementEvent, get_harness_state
 
@@ -31,6 +31,15 @@ class RLMSpawnHandle:
     session_dir: Path
     model: str
     cwd: Path
+    effort: str
+
+
+@dataclass(frozen=True)
+class RLMModelCost:
+    input: float
+    output: float
+    cache_read: float
+    cache_write: float
 
 
 @dataclass(frozen=True)
@@ -39,6 +48,31 @@ class RLMModel:
     id: str
     name: str
     selector: str
+    reasoning: bool
+    input: tuple[str, ...]
+    context_window: int
+    max_tokens: int
+    cost: RLMModelCost
+
+@dataclass(frozen=True)
+class RLMRouteResolution:
+    model: str
+    effort: str | None = None
+
+
+ModelRouteResolver = Callable[
+    [str, str, dict[str, Any]],
+    Awaitable[RLMRouteResolution],
+]
+_model_route_resolver: ModelRouteResolver | None = None
+
+
+def register_model_route_resolver(resolver: ModelRouteResolver | None) -> None:
+    """Install the kernel-local resolver used by ``rlm(..., route=...)``."""
+    global _model_route_resolver
+    if resolver is not None and not callable(resolver):
+        raise TypeError("resolver must be callable or None")
+    _model_route_resolver = resolver
 
 
 @dataclass(frozen=True)
@@ -73,10 +107,11 @@ def _spawn_handle_from_payload(payload: Any) -> RLMSpawnHandle:
     session_dir = payload.get("session_dir")
     model = payload.get("model")
     cwd = payload.get("cwd")
+    effort = payload.get("effort")
     if not all(
         isinstance(value, str) and value
-        for value in (child_id, name, session_dir, model, cwd)
-    ):
+        for value in (child_id, name, session_dir, model, cwd, effort)
+    ) or effort not in {"off", "minimal", "low", "medium", "high", "xhigh", "max"}:
         raise RuntimeError("rlm.run returned an invalid spawn handle")
     return RLMSpawnHandle(
         rlm_child_id=child_id,
@@ -84,6 +119,7 @@ def _spawn_handle_from_payload(payload: Any) -> RLMSpawnHandle:
         session_dir=Path(session_dir),
         model=model,
         cwd=Path(cwd),
+        effort=effort,
     )
 
 
@@ -149,12 +185,36 @@ async def host_request(request_type: str, payload: dict[str, Any] | None = None)
 async def run(prompt: str, **kwargs: Any) -> RLMSpawnHandle:
     """Spawn a recursive Prime Agent child and return once its task is admitted.
 
-    ``model`` selects an exact ``provider/model`` selector. ``cwd`` selects an
-    existing working directory for the child's complete session runtime.
+    ``model`` selects an exact ``provider/model`` selector. ``route`` asks the
+    installed Model Mesh resolver for a selector. ``cwd`` selects an existing
+    working directory for the child's complete session runtime.
     """
     if not isinstance(prompt, str):
         raise TypeError(f"prompt must be str, got {type(prompt).__name__}")
-    payload = await host_request("rlm.run", {"prompt": prompt, "kwargs": kwargs})
+    spawn_kwargs = dict(kwargs)
+    route = spawn_kwargs.pop("route", None)
+    if route is not None:
+        if not isinstance(route, str) or not route.strip():
+            raise TypeError("route must be a non-empty str")
+        if "model" in spawn_kwargs:
+            raise ValueError("rlm.run accepts either route or model, not both")
+        if _model_route_resolver is None:
+            raise RuntimeError(
+                "No Model Mesh route resolver is installed; enable the bundled models skill "
+                "or pass an exact model selector"
+            )
+        resolution = await _model_route_resolver(route.strip(), prompt, spawn_kwargs)
+        if (
+            not isinstance(resolution, RLMRouteResolution)
+            or not isinstance(resolution.model, str)
+            or not resolution.model
+            or (resolution.effort is not None and not isinstance(resolution.effort, str))
+        ):
+            raise RuntimeError("Model Mesh returned an invalid route resolution")
+        spawn_kwargs["model"] = resolution.model
+        if resolution.effort is not None:
+            spawn_kwargs.setdefault("effort", resolution.effort)
+    payload = await host_request("rlm.run", {"prompt": prompt, "kwargs": spawn_kwargs})
     return _spawn_handle_from_payload(payload)
 
 
@@ -165,9 +225,58 @@ def _model_from_payload(payload: Any) -> RLMModel:
     model_id = payload.get("id")
     name = payload.get("name")
     selector = payload.get("selector")
-    if not all(isinstance(value, str) and value for value in (provider, model_id, name, selector)):
+    reasoning = payload.get("reasoning")
+    input_types = payload.get("input")
+    context_window = payload.get("contextWindow")
+    max_tokens = payload.get("maxTokens")
+    cost = payload.get("cost")
+    valid_strings = all(
+        isinstance(value, str) and value for value in (provider, model_id, name, selector)
+    )
+    valid_input = (
+        isinstance(input_types, list)
+        and bool(input_types)
+        and all(value in {"text", "image"} for value in input_types)
+    )
+    valid_limits = (
+        isinstance(context_window, int)
+        and not isinstance(context_window, bool)
+        and context_window > 0
+        and isinstance(max_tokens, int)
+        and not isinstance(max_tokens, bool)
+        and max_tokens > 0
+    )
+    cost_keys = ("input", "output", "cacheRead", "cacheWrite")
+    valid_cost = isinstance(cost, dict) and all(
+        isinstance(cost.get(key), (int, float))
+        and not isinstance(cost.get(key), bool)
+        and cost[key] >= 0
+        for key in cost_keys
+    )
+    if not (
+        valid_strings
+        and isinstance(reasoning, bool)
+        and valid_input
+        and valid_limits
+        and valid_cost
+    ):
         raise RuntimeError("rlm.find_models returned an invalid model entry")
-    return RLMModel(provider=provider, id=model_id, name=name, selector=selector)
+    return RLMModel(
+        provider=provider,
+        id=model_id,
+        name=name,
+        selector=selector,
+        reasoning=reasoning,
+        input=tuple(input_types),
+        context_window=context_window,
+        max_tokens=max_tokens,
+        cost=RLMModelCost(
+            input=float(cost["input"]),
+            output=float(cost["output"]),
+            cache_read=float(cost["cacheRead"]),
+            cache_write=float(cost["cacheWrite"]),
+        ),
+    )
 
 
 async def find_models(query: str = "", limit: int = 8) -> list[RLMModel]:
@@ -326,6 +435,8 @@ __all__ = [
     "McpIntegration",
     "McpToolError",
     "NotEnabled",
+    "RLMModelCost",
+    "RLMRouteResolution",
     "RLMModel",
     "RLMSpawnHandle",
     "RLMSubagent",
@@ -335,6 +446,7 @@ __all__ = [
     "get_harness_state",
     "harness",
     "host_request",
+    "register_model_route_resolver",
     "list_subagents",
     "rlm",
     "run",

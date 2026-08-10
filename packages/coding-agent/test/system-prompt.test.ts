@@ -435,7 +435,12 @@ describe("buildSystemPrompt", () => {
 		const prompt = buildSystemPrompt({
 			selectedTools: ["ipython"],
 			contextFiles: [],
-			skills: [pythonSkill("refine"), pythonSkill("agent-message"), pythonSkill("agent-observe")],
+			skills: [
+				pythonSkill("refine"),
+				pythonSkill("agent-message"),
+				pythonSkill("agent-observe"),
+				pythonSkill("models"),
+			],
 			cwd: "/repo",
 			messagesPath: "/repo/.pi/sessions/session.jsonl",
 		});
@@ -453,6 +458,9 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).toContain("rlm_child_id");
 		expect(prompt).toContain("name='api-reviewer'");
 		expect(prompt).toContain("session_dir");
+		expect(prompt).toContain("effective `effort`");
+		expect(prompt).toContain("route='code'");
+		expect(prompt).toContain("route` and exact `model` are mutually exclusive");
 		expect(prompt).toContain("agent_observe");
 		expect(prompt).toContain("restricted to your parent, siblings, and direct children");
 	});

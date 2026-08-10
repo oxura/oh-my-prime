@@ -63,7 +63,23 @@ handle = await rlm(
 print(handle.rlm_child_id, handle.name, handle.session_dir, handle.model, handle.cwd)
 ```
 
-The call returns immediately after task admission with a child handle; it never waits for or returns the child's answer. The TypeScript host creates a normal child `AgentSession` with an independent context and session directory. The child inherits the parent model, provider configuration, skills, tools, retry policy, and resource loader unless the call requests another configured model. Pass `cwd` to start the child's complete runtime in an existing isolated workspace; relative paths resolve from the parent cwd.
+The call returns immediately after task admission with a child handle; it never waits for or returns the child's answer. The TypeScript host creates a normal child `AgentSession` with an independent context and session directory. The child inherits the parent model, provider configuration, skills, tools, retry policy, and resource loader unless the call requests another configured model. Pass `cwd` to start the child's complete runtime in an existing isolated workspace; relative paths resolve from the parent cwd. Pass `effort` to select a per-child reasoning level, which is clamped to the chosen model's capabilities.
+
+Reusable orchestration can request a semantic Model Mesh route instead of an exact provider model:
+
+```python
+child = await rlm(
+    "Review the candidate",
+    route="review",
+    task_type="security",
+    cwd="/path/to/isolated-worktree",
+)
+print(child.model, child.effort)
+```
+
+The bundled `models` skill resolves `fast`, `code`, `deep`, `review`, `vision`,
+`long-context`, `private-local`, and `max` against authenticated capabilities
+and verifier-backed local outcomes. `route` and `model` are mutually exclusive.
 
 Spawn independent children in separate calls and end the turn instead of awaiting completion:
 
@@ -91,7 +107,7 @@ await agent_message.send(
 
 #### Child handles and lifecycle
 
-An admission handle contains `rlm_child_id`, `name`, `session_dir`, `model`, and `cwd`. Child usage is attributed to the parent session while remaining distinguishable in context-tree reporting.
+An admission handle contains `rlm_child_id`, `name`, `session_dir`, `model`, `cwd`, and the effective `effort`. Child usage is attributed to the parent session while remaining distinguishable in context-tree reporting.
 
 The parent-scoped child registry survives compaction, kernel restart, and parent restoration:
 

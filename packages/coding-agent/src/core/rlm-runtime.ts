@@ -19,6 +19,7 @@ export interface RlmSpawnHandle {
 	session_dir: string;
 	model: string;
 	cwd: string;
+	effort: ThinkingLevel;
 }
 
 export type RlmSubagentRegistryStatus = "running" | "completed" | "error";
@@ -46,6 +47,16 @@ export interface RlmModelMatch {
 	id: string;
 	name: string;
 	selector: string;
+	reasoning: boolean;
+	input: Array<"text" | "image">;
+	contextWindow: number;
+	maxTokens: number;
+	cost: {
+		input: number;
+		output: number;
+		cacheRead: number;
+		cacheWrite: number;
+	};
 }
 
 export interface RlmFindModelsResult {
@@ -59,7 +70,8 @@ export type RlmFindModelsHandler = (query: string, limit: number) => RlmFindMode
 
 const RLM_SUBAGENT_SESSION_NAME_MAX_LENGTH = 64;
 export const DEFAULT_RLM_MODEL_SEARCH_LIMIT = 8;
-export const MAX_RLM_MODEL_SEARCH_LIMIT = 20;
+export const MAX_RLM_MODEL_SEARCH_LIMIT = 100;
+const RLM_EFFORT_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 /** Validate and normalize an orchestrator-supplied subagent session name. */
 export function normalizeRequestedRlmSubagentSessionName(value: unknown): string | undefined {
@@ -92,6 +104,21 @@ export function normalizeRequestedRlmSubagentModel(value: unknown): string | und
 		throw new Error("rlm.run model must not be empty");
 	}
 	return model;
+}
+
+/** Validate an optional per-child reasoning effort. */
+export function normalizeRequestedRlmSubagentEffort(value: unknown): ThinkingLevel | undefined {
+	if (value === undefined) {
+		return undefined;
+	}
+	if (typeof value !== "string") {
+		throw new Error("rlm.run effort must be a string");
+	}
+	const effort = value.trim() as ThinkingLevel;
+	if (!RLM_EFFORT_LEVELS.includes(effort)) {
+		throw new Error(`rlm.run effort must be one of: ${RLM_EFFORT_LEVELS.join(", ")}`);
+	}
+	return effort;
 }
 
 /** Validate and canonicalize an orchestrator-supplied subagent working directory. */
@@ -173,6 +200,11 @@ export function findRlmModelMatches(query: string, models: Model<Api>[], limit: 
 			id: model.id,
 			name: model.name || model.id,
 			selector,
+			reasoning: model.reasoning,
+			input: [...model.input],
+			contextWindow: model.contextWindow,
+			maxTokens: model.maxTokens,
+			cost: { ...model.cost },
 		}));
 }
 

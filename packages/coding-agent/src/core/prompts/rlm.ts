@@ -126,10 +126,15 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 	if (allowRecursion && hasIpython) {
 		parts.push(
 			"",
-			"A callable `rlm` is already in your global namespace. `await rlm('sub-task')` spawns a child and returns immediately after task admission with `rlm_child_id`, `name`, `session_dir`, `model`, and `cwd`; it never waits for or returns the child's answer.",
-			"Choose a stable child name with `await rlm('sub-task', name='api-reviewer')`; names must be unique among siblings. Pass `cwd='/path/to/worktree'` to run the child's complete session inside an existing isolated workspace; relative paths resolve from your cwd.",
+			"A callable `rlm` is already in your global namespace. `await rlm('sub-task')` spawns a child and returns immediately after task admission with `rlm_child_id`, `name`, `session_dir`, `model`, `cwd`, and effective `effort`; it never waits for or returns the child's answer.",
+			"Choose a stable child name with `await rlm('sub-task', name='api-reviewer')`; names must be unique among siblings. Pass `cwd='/path/to/worktree'` to run the child's complete session inside an existing isolated workspace; relative paths resolve from your cwd. Pass `effort='high'` when a child needs a different reasoning budget.",
 			"A child inherits your model. If a different model is explicitly requested, use `await rlm.find_models(...)` and an exact returned selector. An unavailable requested model fails spawn; decide whether to retry or omit `model`.",
 		);
+		if (installedSkills.includes("models")) {
+			parts.push(
+				"Prefer semantic Model Mesh routes in reusable orchestration: `await rlm('sub-task', route='code', task_type='typescript-refactor')`. Routes resolve authenticated capabilities and verified local outcomes; `route` and exact `model` are mutually exclusive.",
+			);
+		}
 		if (hasAgentMessage) {
 			parts.push(
 				"Children reply explicitly with `await agent_message.send(message, receiver_role='parent')` when an answer is needed. Replies and follow-ups arrive as ordinary agent messages; not every task requires a reply.",

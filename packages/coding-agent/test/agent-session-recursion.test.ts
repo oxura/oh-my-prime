@@ -396,18 +396,23 @@ describe("AgentSession rlm recursion", () => {
 		await waitFor(() => forked.getRlmChildSession(spawned.rlm_child_id)?.getLastAssistantText() !== undefined);
 	});
 
-	it("runs the complete child session inside an orchestrator-selected workspace", async () => {
+	it("runs the complete child session with orchestrator-selected workspace and effort", async () => {
 		const workspace = join(tempDir, "candidate-workspace");
 		mkdirSync(workspace);
 		const root = createSession();
 
-		const spawned = await root.runRlmChild("edit only the candidate", { cwd: workspace });
+		const spawned = await root.runRlmChild("edit only the candidate", { cwd: workspace, effort: "high" });
 		expect(spawned.cwd).toBe(workspace);
+		expect(spawned.effort).toBe("high");
 		await waitFor(() => root.getRlmChildSession(spawned.rlm_child_id) !== undefined);
 		expect(root.getRlmChildSession(spawned.rlm_child_id)?.sessionManager.getCwd()).toBe(workspace);
+		expect(root.getRlmChildSession(spawned.rlm_child_id)?.thinkingLevel).toBe("high");
 
 		await expect(root.runRlmChild("invalid workspace", { cwd: join(tempDir, "missing") })).rejects.toThrow(
 			"Requested subagent cwd does not exist",
+		);
+		await expect(root.runRlmChild("invalid effort", { effort: "extreme" })).rejects.toThrow(
+			"rlm.run effort must be one of",
 		);
 	});
 
@@ -3034,6 +3039,7 @@ describe("AgentSession rlm recursion", () => {
 						session_dir: "/tmp/sub-detached",
 						model: "test/model",
 						cwd: tempDir,
+						effort: "off",
 					};
 				}),
 			},

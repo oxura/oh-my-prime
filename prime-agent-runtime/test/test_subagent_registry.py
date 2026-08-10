@@ -61,7 +61,7 @@ class RlmSubagentRegistryTest(unittest.TestCase):
 
         self.assertEqual(subagents[0].status, "error")
 
-    def test_forwards_orchestrator_name_model_and_cwd_to_host(self) -> None:
+    def test_forwards_orchestrator_name_model_cwd_and_effort_to_host(self) -> None:
         host_request = AsyncMock(
             return_value={
                 "rlm_child_id": "sub-a1b2c3d4",
@@ -69,6 +69,7 @@ class RlmSubagentRegistryTest(unittest.TestCase):
                 "session_dir": "/tmp/parent/sub-a1b2c3d4",
                 "model": "deepseek/deepseek-v4-flash",
                 "cwd": "/tmp/worktree",
+                "effort": "high",
             }
         )
 
@@ -79,6 +80,7 @@ class RlmSubagentRegistryTest(unittest.TestCase):
                     name="api-reviewer",
                     model="deepseek/deepseek-v4-flash",
                     cwd="/tmp/worktree",
+                    effort="high",
                 )
             )
 
@@ -90,6 +92,7 @@ class RlmSubagentRegistryTest(unittest.TestCase):
                     "name": "api-reviewer",
                     "model": "deepseek/deepseek-v4-flash",
                     "cwd": "/tmp/worktree",
+                    "effort": "high",
                 },
             },
         )
@@ -97,6 +100,57 @@ class RlmSubagentRegistryTest(unittest.TestCase):
         self.assertEqual(result.name, "api-reviewer")
         self.assertEqual(result.model, "deepseek/deepseek-v4-flash")
         self.assertEqual(result.cwd, Path("/tmp/worktree"))
+        self.assertEqual(result.effort, "high")
+
+    def test_resolves_semantic_route_before_calling_host(self) -> None:
+        async def resolver(route, prompt, kwargs):
+            self.assertEqual(route, "review")
+            self.assertEqual(prompt, "check the API")
+            self.assertEqual(kwargs.pop("task_type"), "security")
+            return rlm_module.RLMRouteResolution(
+                model="anthropic/claude-opus-4-7",
+                effort="xhigh",
+            )
+
+        host_request = AsyncMock(
+            return_value={
+                "rlm_child_id": "sub-review",
+                "name": "reviewer",
+                "session_dir": "/tmp/parent/sub-review",
+                "model": "anthropic/claude-opus-4-7",
+                "cwd": "/tmp/worktree",
+                "effort": "xhigh",
+            }
+        )
+        rlm_module.register_model_route_resolver(resolver)
+        try:
+            with patch.object(rlm_module, "host_request", host_request):
+                result = asyncio.run(
+                    rlm_module.rlm(
+                        "check the API",
+                        route="review",
+                        task_type="security",
+                        name="reviewer",
+                        cwd="/tmp/worktree",
+                    )
+                )
+        finally:
+            rlm_module.register_model_route_resolver(None)
+
+        host_request.assert_awaited_once_with(
+            "rlm.run",
+            {
+                "prompt": "check the API",
+                "kwargs": {
+                    "name": "reviewer",
+                    "cwd": "/tmp/worktree",
+                    "model": "anthropic/claude-opus-4-7",
+                    "effort": "xhigh",
+                },
+            },
+        )
+        self.assertEqual(result.model, "anthropic/claude-opus-4-7")
+        self.assertEqual(result.effort, "xhigh")
 
     def test_finds_authenticated_models_through_host(self) -> None:
         host_request = AsyncMock(
@@ -107,6 +161,16 @@ class RlmSubagentRegistryTest(unittest.TestCase):
                         "id": "claude-opus-4-7",
                         "name": "Claude Opus 4.7",
                         "selector": "anthropic/claude-opus-4-7",
+                        "reasoning": True,
+                        "input": ["text", "image"],
+                        "contextWindow": 200_000,
+                        "maxTokens": 32_000,
+                        "cost": {
+                            "input": 5,
+                            "output": 25,
+                            "cacheRead": 0.5,
+                            "cacheWrite": 6.25,
+                        },
                     }
                 ]
             }
@@ -119,6 +183,11 @@ class RlmSubagentRegistryTest(unittest.TestCase):
         self.assertEqual(models[0].id, "claude-opus-4-7")
         self.assertEqual(models[0].name, "Claude Opus 4.7")
         self.assertEqual(models[0].selector, "anthropic/claude-opus-4-7")
+        self.assertTrue(models[0].reasoning)
+        self.assertEqual(models[0].input, ("text", "image"))
+        self.assertEqual(models[0].context_window, 200_000)
+        self.assertEqual(models[0].max_tokens, 32_000)
+        self.assertEqual(models[0].cost.output, 25)
         host_request.assert_awaited_once_with(
             "rlm.find_models",
             {"query": "opus", "limit": 3},
