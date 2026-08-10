@@ -1,3 +1,5 @@
+import { realpathSync, statSync } from "node:fs";
+import { resolve } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model, ServiceTier } from "@earendil-works/pi-ai";
 import type { AgentSession } from "./agent-session.js";
@@ -16,6 +18,7 @@ export interface RlmSpawnHandle {
 	name: string;
 	session_dir: string;
 	model: string;
+	cwd: string;
 }
 
 export type RlmSubagentRegistryStatus = "running" | "completed" | "error";
@@ -89,6 +92,31 @@ export function normalizeRequestedRlmSubagentModel(value: unknown): string | und
 		throw new Error("rlm.run model must not be empty");
 	}
 	return model;
+}
+
+/** Validate and canonicalize an orchestrator-supplied subagent working directory. */
+export function normalizeRequestedRlmSubagentCwd(value: unknown, parentCwd: string): string | undefined {
+	if (value === undefined) {
+		return undefined;
+	}
+	if (typeof value !== "string") {
+		throw new Error("rlm.run cwd must be a string");
+	}
+	const requested = value.trim();
+	if (!requested) {
+		throw new Error("rlm.run cwd must not be empty");
+	}
+	const resolved = resolve(parentCwd, requested);
+	let isDirectory = false;
+	try {
+		isDirectory = statSync(resolved).isDirectory();
+	} catch {
+		throw new Error(`Requested subagent cwd does not exist: ${resolved}`);
+	}
+	if (!isDirectory) {
+		throw new Error(`Requested subagent cwd is not a directory: ${resolved}`);
+	}
+	return realpathSync(resolved);
 }
 
 /** Create a readable, collision-resistant default name usable as an agent-message selector. */
@@ -208,6 +236,7 @@ export interface CreateRlmSubagentRuntimeOptions {
 	prompt: string;
 	sessionName: string;
 	sessionDir: string;
+	cwd: string;
 	model: Model<any>;
 	thinkingLevel: ThinkingLevel;
 	serviceTier: ServiceTier;

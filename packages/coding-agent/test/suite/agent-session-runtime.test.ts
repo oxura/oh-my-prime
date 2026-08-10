@@ -338,6 +338,7 @@ describe("AgentSessionRuntime characterization", () => {
 		const baseOptions = {
 			parentSession,
 			prompt: "run in process",
+			cwd: tempDir,
 			model: faux.getModel(),
 			thinkingLevel: "off" as const,
 			serviceTier: null,
@@ -399,6 +400,7 @@ describe("AgentSessionRuntime characterization", () => {
 			prompt: "inspect parent identity",
 			sessionName: "child-worker",
 			sessionDir: join(runtime.cwd, "parent-agent-child"),
+			cwd: runtime.cwd,
 			model: runtime.session.model!,
 			thinkingLevel: "off",
 			serviceTier: null,

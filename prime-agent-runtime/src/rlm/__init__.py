@@ -30,6 +30,7 @@ class RLMSpawnHandle:
     name: str
     session_dir: Path
     model: str
+    cwd: Path
 
 
 @dataclass(frozen=True)
@@ -71,13 +72,18 @@ def _spawn_handle_from_payload(payload: Any) -> RLMSpawnHandle:
     name = payload.get("name")
     session_dir = payload.get("session_dir")
     model = payload.get("model")
-    if not all(isinstance(value, str) and value for value in (child_id, name, session_dir, model)):
+    cwd = payload.get("cwd")
+    if not all(
+        isinstance(value, str) and value
+        for value in (child_id, name, session_dir, model, cwd)
+    ):
         raise RuntimeError("rlm.run returned an invalid spawn handle")
     return RLMSpawnHandle(
         rlm_child_id=child_id,
         name=name,
         session_dir=Path(session_dir),
         model=model,
+        cwd=Path(cwd),
     )
 
 
@@ -143,7 +149,8 @@ async def host_request(request_type: str, payload: dict[str, Any] | None = None)
 async def run(prompt: str, **kwargs: Any) -> RLMSpawnHandle:
     """Spawn a recursive Prime Agent child and return once its task is admitted.
 
-    ``model`` selects a child with an exact ``provider/model`` selector.
+    ``model`` selects an exact ``provider/model`` selector. ``cwd`` selects an
+    existing working directory for the child's complete session runtime.
     """
     if not isinstance(prompt, str):
         raise TypeError(f"prompt must be str, got {type(prompt).__name__}")

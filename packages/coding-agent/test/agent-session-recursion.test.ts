@@ -396,6 +396,21 @@ describe("AgentSession rlm recursion", () => {
 		await waitFor(() => forked.getRlmChildSession(spawned.rlm_child_id)?.getLastAssistantText() !== undefined);
 	});
 
+	it("runs the complete child session inside an orchestrator-selected workspace", async () => {
+		const workspace = join(tempDir, "candidate-workspace");
+		mkdirSync(workspace);
+		const root = createSession();
+
+		const spawned = await root.runRlmChild("edit only the candidate", { cwd: workspace });
+		expect(spawned.cwd).toBe(workspace);
+		await waitFor(() => root.getRlmChildSession(spawned.rlm_child_id) !== undefined);
+		expect(root.getRlmChildSession(spawned.rlm_child_id)?.sessionManager.getCwd()).toBe(workspace);
+
+		await expect(root.runRlmChild("invalid workspace", { cwd: join(tempDir, "missing") })).rejects.toThrow(
+			"Requested subagent cwd does not exist",
+		);
+	});
+
 	it("creates readable collision-resistant default subagent session names", () => {
 		expect(createDefaultRlmSubagentSessionName("Summarize the HTTP API!", "sub-a1b2c3d4")).toBe(
 			"subagent-summarize-the-http-api-a1b2c3d4",
@@ -3018,6 +3033,7 @@ describe("AgentSession rlm recursion", () => {
 						name: "detached-worker",
 						session_dir: "/tmp/sub-detached",
 						model: "test/model",
+						cwd: tempDir,
 					};
 				}),
 			},

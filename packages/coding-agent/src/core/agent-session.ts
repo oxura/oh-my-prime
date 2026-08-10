@@ -222,6 +222,7 @@ import {
 	createRlmListSubagentsHostHandler,
 	createRlmRunHostHandler,
 	findRlmModelMatches,
+	normalizeRequestedRlmSubagentCwd,
 	normalizeRequestedRlmSubagentModel,
 	normalizeRequestedRlmSubagentSessionName,
 	type RlmDeleteSubagentResult,
@@ -8932,6 +8933,7 @@ export class AgentSession {
 		sessionName: string;
 		spawnCode?: string;
 		sessionDir: string;
+		cwd: string;
 		model: Model<any>;
 	}): CreateRlmSubagentRuntimeOptions {
 		return {
@@ -8941,6 +8943,7 @@ export class AgentSession {
 			sessionName: options.sessionName,
 			spawnCode: options.spawnCode,
 			sessionDir: options.sessionDir,
+			cwd: options.cwd,
 			model: options.model,
 			thinkingLevel: clampThinkingLevel(options.model, this.thinkingLevel) as ThinkingLevel,
 			serviceTier:
@@ -8966,7 +8969,7 @@ export class AgentSession {
 	}
 
 	private _createInlineRlmSubagentRuntime(options: CreateRlmSubagentRuntimeOptions): RlmSubagentRuntime {
-		const childSessionManager = SessionManager.create(this._cwd, options.sessionDir);
+		const childSessionManager = SessionManager.create(options.cwd, options.sessionDir);
 		if (options.parentSession.sessionFile) {
 			childSessionManager.newSession({
 				parentSession: options.parentSession.sessionFile,
@@ -9004,7 +9007,7 @@ export class AgentSession {
 			agent: childAgent,
 			sessionManager: childSessionManager,
 			settingsManager: this.settingsManager,
-			cwd: this._cwd,
+			cwd: options.cwd,
 			agentDir: this._agentDir,
 			scopedModels: options.scopedModels,
 			resourceLoader: this._resourceLoader,
@@ -9606,13 +9609,14 @@ export class AgentSession {
 		kwargs: Record<string, unknown> = {},
 		spawnCode?: string,
 	): Promise<RlmSpawnHandle> {
-		const { name: rawName, model: rawModel, ...unsupported } = kwargs;
+		const { name: rawName, model: rawModel, cwd: rawCwd, ...unsupported } = kwargs;
 		const unsupportedKwargs = Object.keys(unsupported);
 		if (unsupportedKwargs.length > 0) {
 			throw new Error(`Unsupported rlm.run kwargs: ${unsupportedKwargs.sort().join(", ")}`);
 		}
 		const requestedSessionName = normalizeRequestedRlmSubagentSessionName(rawName);
 		const requestedModel = normalizeRequestedRlmSubagentModel(rawModel);
+		const requestedCwd = normalizeRequestedRlmSubagentCwd(rawCwd, this._cwd) ?? this._cwd;
 		if (requestedSessionName) assertDirectAgentMessageTarget(requestedSessionName);
 		if (this._rlmDepth >= this._rlmMaxDepth) {
 			throw new Error(
@@ -9701,6 +9705,7 @@ export class AgentSession {
 				sessionName,
 				spawnCode,
 				sessionDir: childSessionDir,
+				cwd: requestedCwd,
 				model: modelSelection.model,
 			}),
 			onSessionPublished: publishChildSession,
@@ -9949,6 +9954,7 @@ export class AgentSession {
 			name: sessionName,
 			session_dir: childSessionDir,
 			model: `${modelSelection.model.provider}/${modelSelection.model.id}`,
+			cwd: requestedCwd,
 		};
 	}
 

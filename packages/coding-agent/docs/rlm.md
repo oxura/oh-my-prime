@@ -55,11 +55,15 @@ Each `%%bash` cell is a temporary subshell, while Python state and `%cd` changes
 The callable `rlm` object is preloaded in the kernel. Spawn a child with a direct call:
 
 ```python
-handle = await rlm("Review the authentication flow for security issues", name="auth-reviewer")
-print(handle.rlm_child_id, handle.name, handle.session_dir, handle.model)
+handle = await rlm(
+    "Review the authentication flow for security issues",
+    name="auth-reviewer",
+    cwd="/path/to/isolated-worktree",
+)
+print(handle.rlm_child_id, handle.name, handle.session_dir, handle.model, handle.cwd)
 ```
 
-The call returns immediately after task admission with a child handle; it never waits for or returns the child's answer. The TypeScript host creates a normal child `AgentSession` with an independent context and session directory. The child inherits the parent model, provider configuration, skills, tools, retry policy, and resource loader unless the call requests another configured model.
+The call returns immediately after task admission with a child handle; it never waits for or returns the child's answer. The TypeScript host creates a normal child `AgentSession` with an independent context and session directory. The child inherits the parent model, provider configuration, skills, tools, retry policy, and resource loader unless the call requests another configured model. Pass `cwd` to start the child's complete runtime in an existing isolated workspace; relative paths resolve from the parent cwd.
 
 Spawn independent children in separate calls and end the turn instead of awaiting completion:
 
@@ -87,7 +91,7 @@ await agent_message.send(
 
 #### Child handles and lifecycle
 
-An admission handle contains `rlm_child_id`, `name`, `session_dir`, and `model`. Child usage is attributed to the parent session while remaining distinguishable in context-tree reporting.
+An admission handle contains `rlm_child_id`, `name`, `session_dir`, `model`, and `cwd`. Child usage is attributed to the parent session while remaining distinguishable in context-tree reporting.
 
 The parent-scoped child registry survives compaction, kernel restart, and parent restoration:
 
