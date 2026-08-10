@@ -69,3 +69,18 @@ class ModelSelection:
     @property
     def selector(self) -> str:
         return self.model.selector
+
+
+@dataclass(frozen=True, slots=True)
+class MakerCheckerPair:
+    """Two route selections satisfying explicit independence constraints."""
+
+    maker: ModelSelection
+    checker: ModelSelection
+    different_provider: bool
+
+    def __post_init__(self) -> None:
+        if self.maker.selector == self.checker.selector:
+            raise ModelMeshError("maker and checker must use different models")
+        if self.different_provider and self.maker.model.provider == self.checker.model.provider:
+            raise ModelMeshError("maker and checker must use different providers")

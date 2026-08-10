@@ -12,10 +12,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator, Awaitable, Callable, Sequence, cast
 
-from rlm import RLMModel, rlm
+from rlm import RLMModel, RLMSpawnHandle, rlm
 
 from ._models import (
     Effort,
+    MakerCheckerPair,
     ModelMeshError,
     ModelOutcome,
     ModelSelection,
@@ -146,6 +147,9 @@ def _is_local(model: RLMModel) -> bool:
     return any(marker in text for marker in _LOCAL_MARKERS)
 
 
+IndependenceTarget = str | ModelSelection | RLMSpawnHandle
+
+
 class ModelMesh:
     """Capability-aware semantic routes learned from verifier outcomes."""
 
@@ -232,12 +236,18 @@ class ModelMesh:
         route: str,
         *,
         task_type: str = "code",
-        independent_of: str | ModelSelection | Sequence[str] | None = None,
+        independent_of: IndependenceTarget | Sequence[IndependenceTarget] | None = None,
+        different_provider: bool = False,
     ) -> ModelSelection:
         """Resolve one authenticated exact model using capabilities and verified history."""
         route_name = self._normalize_route_name(route)
         task = self._normalize_task_type(task_type)
-        excluded = self._normalize_exclusions(independent_of)
+        if not isinstance(different_provider, bool):
+            raise TypeError("different_provider must be bool")
+        excluded_selectors, excluded_providers = self._normalize_exclusions(
+            independent_of,
+            different_provider=different_provider,
+        )
         async with self._locked_state() as state:
             policies = self._policies_from_state(state)
             policy = policies.get(route_name)
@@ -245,11 +255,17 @@ class ModelMesh:
                 raise RouteNotFound(f"unknown model route: {route_name}")
             outcomes = self._outcomes_from_state(state)
         catalog = await self.model_source("", 100)
-        eligible = self._eligible_models(policy, catalog, excluded)
+        eligible = self._eligible_models(
+            policy,
+            catalog,
+            excluded_selectors,
+            excluded_providers,
+        )
         if not eligible:
-            exclusions = f" (excluding {', '.join(sorted(excluded))})" if excluded else ""
+            excluded = sorted(excluded_selectors | {f"{provider}/*" for provider in excluded_providers})
+            detail = f" (excluding {', '.join(excluded)})" if excluded else ""
             raise NoEligibleModel(
-                f"no authenticated model satisfies route {route_name!r}{exclusions}"
+                f"no authenticated model satisfies route {route_name!r}{detail}"
             )
         total_trials = sum(
             outcome.trials
@@ -277,6 +293,30 @@ class ModelMesh:
             score=score,
             reason=reason,
             prior=prior,
+        )
+
+    async def pair(
+        self,
+        *,
+        maker_route: str = "code",
+        checker_route: str = "review",
+        task_type: str = "code",
+        different_provider: bool = True,
+    ) -> MakerCheckerPair:
+        """Select maker and checker models with enforced independence."""
+        if not isinstance(different_provider, bool):
+            raise TypeError("different_provider must be bool")
+        maker = await self.resolve(maker_route, task_type=task_type)
+        checker = await self.resolve(
+            checker_route,
+            task_type=f"{task_type}:checker",
+            independent_of=maker,
+            different_provider=different_provider,
+        )
+        return MakerCheckerPair(
+            maker=maker,
+            checker=checker,
+            different_provider=different_provider,
         )
 
     async def record(
@@ -313,7 +353,8 @@ class ModelMesh:
         self,
         policy: RoutePolicy,
         catalog: Sequence[RLMModel],
-        excluded: set[str],
+        excluded_selectors: set[str],
+        excluded_providers: set[str],
     ) -> list[tuple[RLMModel, int | None]]:
         explicit_matches: dict[str, int] = {}
         if policy.candidates:
@@ -325,7 +366,7 @@ class ModelMesh:
                         break
         eligible: list[tuple[RLMModel, int | None]] = []
         for model in catalog:
-            if model.selector in excluded:
+            if model.selector in excluded_selectors or model.provider in excluded_providers:
                 continue
             if policy.candidates and model.selector not in explicit_matches:
                 continue
@@ -541,19 +582,38 @@ class ModelMesh:
 
     @staticmethod
     def _normalize_exclusions(
-        value: str | ModelSelection | Sequence[str] | None,
-    ) -> set[str]:
+        value: IndependenceTarget | Sequence[IndependenceTarget] | None,
+        *,
+        different_provider: bool,
+    ) -> tuple[set[str], set[str]]:
         if value is None:
-            return set()
-        if isinstance(value, ModelSelection):
-            return {value.selector}
-        if isinstance(value, str):
-            return {value}
-        if not isinstance(value, Sequence):
-            raise ModelMeshError("independent_of must be a selector, selection, sequence, or None")
+            return set(), set()
+        values: Sequence[IndependenceTarget]
+        if isinstance(value, (str, ModelSelection, RLMSpawnHandle)):
+            values = (value,)
+        elif isinstance(value, Sequence):
+            values = value
+        else:
+            raise ModelMeshError(
+                "independent_of must be a selector, model selection, spawn handle, sequence, or None"
+            )
         selectors: set[str] = set()
-        for selector in value:
-            if not isinstance(selector, str) or not selector.strip():
-                raise ModelMeshError("independent_of selectors must be non-empty strings")
-            selectors.add(selector.strip())
-        return selectors
+        providers: set[str] = set()
+        for item in values:
+            if isinstance(item, ModelSelection):
+                selector = item.selector
+                provider = item.model.provider
+            elif isinstance(item, RLMSpawnHandle):
+                selector = item.model
+                provider = selector.split("/", 1)[0]
+            elif isinstance(item, str) and item.strip():
+                selector = item.strip()
+                provider = selector.split("/", 1)[0]
+            else:
+                raise ModelMeshError(
+                    "independent_of entries must be selectors, selections, or spawn handles"
+                )
+            selectors.add(selector)
+            if different_provider:
+                providers.add(provider)
+        return selectors, providers

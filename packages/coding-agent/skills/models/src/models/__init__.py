@@ -6,9 +6,10 @@ from typing import Sequence
 
 from rlm import RLMRouteResolution, register_model_route_resolver
 
-from ._mesh import ModelMesh
+from ._mesh import IndependenceTarget, ModelMesh
 from ._models import (
     Effort,
+    MakerCheckerPair,
     ModelMeshError,
     ModelOutcome,
     ModelSelection,
@@ -56,15 +57,32 @@ async def resolve(
     route: str,
     *,
     task_type: str = "code",
-    independent_of: str | ModelSelection | Sequence[str] | None = None,
+    independent_of: IndependenceTarget | Sequence[IndependenceTarget] | None = None,
+    different_provider: bool = False,
 ) -> ModelSelection:
     """Resolve one authenticated exact selector for a semantic route."""
     return await _default_mesh.resolve(
         route,
         task_type=task_type,
         independent_of=independent_of,
+        different_provider=different_provider,
     )
 
+
+async def pair(
+    *,
+    maker_route: str = "code",
+    checker_route: str = "review",
+    task_type: str = "code",
+    different_provider: bool = True,
+) -> MakerCheckerPair:
+    """Select maker and checker models with enforced independence."""
+    return await _default_mesh.pair(
+        maker_route=maker_route,
+        checker_route=checker_route,
+        task_type=task_type,
+        different_provider=different_provider,
+    )
 
 async def record(
     selection: ModelSelection,
@@ -87,10 +105,12 @@ async def _resolve_rlm_route(
 ) -> RLMRouteResolution:
     task_type = kwargs.pop("task_type", route)
     independent_of = kwargs.pop("independent_of", None)
+    different_provider = kwargs.pop("different_provider", False)
     selection = await _default_mesh.resolve(
         route,
         task_type=task_type,
         independent_of=independent_of,
+        different_provider=different_provider,
     )
     return RLMRouteResolution(model=selection.selector, effort=selection.effort)
 
@@ -100,6 +120,7 @@ register_model_route_resolver(_resolve_rlm_route)
 
 __all__ = [
     "Effort",
+    "MakerCheckerPair",
     "ModelMesh",
     "ModelMeshError",
     "ModelOutcome",
@@ -107,6 +128,7 @@ __all__ = [
     "NoEligibleModel",
     "RouteNotFound",
     "RoutePolicy",
+    "pair",
     "configure",
     "record",
     "resolve",

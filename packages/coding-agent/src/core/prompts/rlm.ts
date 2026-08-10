@@ -133,6 +133,7 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 		if (installedSkills.includes("models")) {
 			parts.push(
 				"Prefer semantic Model Mesh routes in reusable orchestration: `await rlm('sub-task', route='code', task_type='typescript-refactor')`. Routes resolve authenticated capabilities and verified local outcomes; `route` and exact `model` are mutually exclusive.",
+				"For maker/checker separation, pass the maker handle as `independent_of` and set `different_provider=True` on the checker route. Model Mesh excludes the maker model and provider and fails closed when no independent checker is authenticated.",
 			);
 		}
 		if (hasAgentMessage) {

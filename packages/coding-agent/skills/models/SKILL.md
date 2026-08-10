@@ -86,6 +86,36 @@ Outcomes are keyed by route, task type, and exact selector. Model changes do not
 require changing RLM programs, and a newly authenticated model receives an
 exploration opportunity without immediately displacing proven models.
 
-Use `independent_of=selection` (or selector strings) to exclude a maker model
-when resolving an independent checker. Maker/checker enforcement is described
-by the ProofTree and verifier APIs.
+## Maker/checker separation
+
+Resolve a pair before starting work. The default fails closed unless the checker
+uses both a different exact model and a different provider:
+
+```python
+pair = await models.pair(
+    maker_route="code",
+    checker_route="review",
+    task_type="queue-concurrency",
+)
+
+maker = await rlm(task, model=pair.maker.selector, effort=pair.maker.effort)
+# After implementation, give the checker only the goal, contract, diff, and evidence.
+checker = await rlm(review_task, model=pair.checker.selector, effort=pair.checker.effort)
+```
+
+For dynamic routing, a spawn handle is accepted directly:
+
+```python
+maker = await rlm(task, route="code")
+checker = await rlm(
+    review_task,
+    route="review",
+    independent_of=maker,
+    different_provider=True,
+)
+```
+
+`different_provider=True` excludes the maker's entire provider, reducing shared
+provider-cache and model-family bias. It never silently relaxes when no
+independent authenticated model exists. Set it to `False` explicitly only when
+different exact models within one provider are an acceptable compromise.

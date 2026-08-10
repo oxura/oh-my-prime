@@ -12,7 +12,7 @@ sys.path.insert(0, str(REPO_ROOT / "prime-agent-runtime" / "src"))
 sys.path.insert(0, str(SKILLS_ROOT / "models" / "src"))
 
 from models import ModelMesh, NoEligibleModel  # noqa: E402
-from rlm import RLMModel, RLMModelCost  # noqa: E402
+from rlm import RLMModel, RLMModelCost, RLMSpawnHandle  # noqa: E402
 
 
 def make_model(
@@ -99,6 +99,51 @@ class ModelMeshTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(primary.effort, "xhigh")
         self.assertEqual(checker.selector, "cloud/coder-pro")
         self.assertNotEqual(primary.selector, checker.selector)
+
+    async def test_pair_enforces_model_and_provider_independence(self) -> None:
+        self.catalog.append(
+            make_model(
+                "other/reviewer-max",
+                name="Independent Reviewer",
+                context_window=256_000,
+            )
+        )
+
+        pair = await self.mesh.pair(
+            maker_route="code",
+            checker_route="review",
+            task_type="security",
+        )
+
+        self.assertNotEqual(pair.maker.selector, pair.checker.selector)
+        self.assertNotEqual(pair.maker.model.provider, pair.checker.model.provider)
+        self.assertTrue(pair.different_provider)
+        maker_handle = RLMSpawnHandle(
+            rlm_child_id="sub-maker",
+            name="maker",
+            session_dir=self.root / "maker-session",
+            model=pair.maker.selector,
+            cwd=self.root,
+            effort="high",
+        )
+        dynamic_checker = await self.mesh.resolve(
+            "review",
+            independent_of=maker_handle,
+            different_provider=True,
+        )
+        self.assertNotEqual(
+            maker_handle.model.split("/", 1)[0],
+            dynamic_checker.model.provider,
+        )
+
+    async def test_pair_fails_closed_without_an_independent_provider(self) -> None:
+        self.catalog = [
+            make_model("cloud/coder-pro"),
+            make_model("cloud/reviewer-pro"),
+        ]
+
+        with self.assertRaisesRegex(NoEligibleModel, "no authenticated model satisfies route"):
+            await self.mesh.pair(maker_route="code", checker_route="review")
 
     async def test_verified_history_changes_future_routing_and_persists(self) -> None:
         await self.mesh.configure(

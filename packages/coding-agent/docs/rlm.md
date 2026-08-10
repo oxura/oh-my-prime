@@ -81,6 +81,21 @@ The bundled `models` skill resolves `fast`, `code`, `deep`, `review`, `vision`,
 `long-context`, `private-local`, and `max` against authenticated capabilities
 and verifier-backed local outcomes. `route` and `model` are mutually exclusive.
 
+For maker/checker separation, route the checker independently from the admitted
+maker. `different_provider=True` fails closed unless another authenticated
+provider satisfies the checker route:
+
+```python
+maker = await rlm("Implement the candidate", route="code", cwd=workspace)
+checker = await rlm(
+    "Adversarially review the diff and verifier evidence",
+    route="review",
+    independent_of=maker,
+    different_provider=True,
+    cwd=workspace,
+)
+```
+
 Spawn independent children in separate calls and end the turn instead of awaiting completion:
 
 ```python

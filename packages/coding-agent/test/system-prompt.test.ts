@@ -461,6 +461,7 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).toContain("effective `effort`");
 		expect(prompt).toContain("route='code'");
 		expect(prompt).toContain("route` and exact `model` are mutually exclusive");
+		expect(prompt).toContain("different_provider=True");
 		expect(prompt).toContain("agent_observe");
 		expect(prompt).toContain("restricted to your parent, siblings, and direct children");
 	});
