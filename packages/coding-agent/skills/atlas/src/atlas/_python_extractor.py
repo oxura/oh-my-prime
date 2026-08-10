@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 import hashlib
 from dataclasses import dataclass
-from pathlib import Path
 
 
 @dataclass(slots=True)
@@ -125,7 +124,8 @@ def parse_python(path: str, source: str) -> ParsedPython:
                     base,
                     "extends",
                     name,
-                    target_key=definitions.get(name) or definitions.get(name.rsplit(".", 1)[-1]),
+                    target_key=definitions.get(name)
+                    or definitions.get(name.rsplit(".", 1)[-1]),
                     confidence=1 if name in definitions else 0.6,
                 )
             key = node_keys[id(node)]
@@ -155,22 +155,26 @@ def parse_python(path: str, source: str) -> ParsedPython:
             self.generic_visit(node)
 
         def visit_Name(self, node: ast.Name) -> None:
-            if isinstance(node.ctx, ast.Load) and (target_key := definitions.get(node.id)):
+            if isinstance(node.ctx, ast.Load) and (
+                target_key := definitions.get(node.id)
+            ):
                 self.edge(node, "references", node.id, target_key=target_key)
 
     EdgeVisitor().visit(tree)
-    deduplicated = list({
-        (
-            edge["source_key"],
-            edge["source_file"],
-            edge["target_key"],
-            edge["target_name"],
-            edge["target_file"],
-            edge["kind"],
-            edge["line"],
-        ): edge
-        for edge in edges
-    }.values())
+    deduplicated = list(
+        {
+            (
+                edge["source_key"],
+                edge["source_file"],
+                edge["target_key"],
+                edge["target_name"],
+                edge["target_file"],
+                edge["kind"],
+                edge["line"],
+            ): edge
+            for edge in edges
+        }.values()
+    )
     return ParsedPython(
         symbols=symbols,
         edges=deduplicated,

@@ -6,11 +6,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SKILL_ROOT / "src"))
 
-from atlas import AtlasError, CodeAtlas  # noqa: E402
+from atlas import AtlasError, CodeAtlas
 
 
 class CodeAtlasTest(unittest.IsolatedAsyncioTestCase):
@@ -33,7 +32,9 @@ class CodeAtlasTest(unittest.IsolatedAsyncioTestCase):
         )
         source_typescript = Path.cwd().parents[1] / "node_modules" / "typescript"
         if not source_typescript.is_dir():
-            raise RuntimeError(f"TypeScript fixture dependency not found: {source_typescript}")
+            raise RuntimeError(
+                f"TypeScript fixture dependency not found: {source_typescript}"
+            )
         (self.repo / "node_modules").mkdir()
         (self.repo / "node_modules" / "typescript").symlink_to(
             source_typescript,
@@ -82,8 +83,7 @@ class CodeAtlasTest(unittest.IsolatedAsyncioTestCase):
         result = subprocess.run(
             ("git", "-C", str(self.repo), *args),
             check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             text=True,
         )
         return result.stdout.rstrip("\n")
@@ -103,32 +103,68 @@ class CodeAtlasTest(unittest.IsolatedAsyncioTestCase):
         service_run = await self.atlas.symbol("Service.run", repo=self.repo)
         calls = await self.atlas.outgoing(service_run, kinds=("calls",), repo=self.repo)
         self.assertTrue(any(edge.target_name == "helper" for edge in calls))
-        target_key = next(edge.target_symbol_key for edge in calls if edge.target_name == "helper")
+        target_key = next(
+            edge.target_symbol_key for edge in calls if edge.target_name == "helper"
+        )
         self.assertIsNotNone(target_key)
 
         helper = await self.atlas.symbol(target_key, repo=self.repo)
-        references = await self.atlas.references(helper, kinds=("calls",), repo=self.repo)
-        self.assertTrue(any(edge.source_symbol_key == service_run.key for edge in references))
+        references = await self.atlas.references(
+            helper, kinds=("calls",), repo=self.repo
+        )
+        self.assertTrue(
+            any(edge.source_symbol_key == service_run.key for edge in references)
+        )
 
         worker_run = await self.atlas.symbol("Worker.run", repo=self.repo)
-        python_calls = await self.atlas.outgoing(worker_run, kinds=("calls",), repo=self.repo)
-        self.assertTrue(any(edge.target_name == "helper" and edge.confidence == 1 for edge in python_calls))
+        python_calls = await self.atlas.outgoing(
+            worker_run, kinds=("calls",), repo=self.repo
+        )
+        self.assertTrue(
+            any(
+                edge.target_name == "helper" and edge.confidence == 1
+                for edge in python_calls
+            )
+        )
 
     async def test_rebuild_reports_content_changes_and_removed_files(self) -> None:
         await self.atlas.build(self.repo)
         service = self.repo / "src" / "service.ts"
-        service.write_text(service.read_text(encoding="utf-8") + "export const added = 2;\n", encoding="utf-8")
+        service.write_text(
+            service.read_text(encoding="utf-8") + "export const added = 2;\n",
+            encoding="utf-8",
+        )
 
         changed = await self.atlas.build(self.repo)
         self.assertEqual(changed.changed_files, 1)
         self.assertEqual(changed.removed_files, 0)
-        self.assertEqual((await self.atlas.symbol("added", repo=self.repo)).kind, "variable")
+        self.assertEqual(
+            (await self.atlas.symbol("added", repo=self.repo)).kind, "variable"
+        )
 
         self._git("rm", "pkg/worker.py")
         removed = await self.atlas.build(self.repo)
         self.assertEqual(removed.removed_files, 1)
         with self.assertRaisesRegex(AtlasError, "symbol not found"):
             await self.atlas.symbol("Worker.run", repo=self.repo)
+
+    async def test_freshness_detects_and_accepts_indexed_dirty_content(self) -> None:
+        await self.atlas.build(self.repo)
+        self.assertTrue((await self.atlas.freshness(self.repo)).fresh)
+
+        service = self.repo / "src" / "service.ts"
+        service.write_text(
+            service.read_text(encoding="utf-8") + "export const dirty = true;\n",
+            encoding="utf-8",
+        )
+        stale = await self.atlas.freshness(self.repo)
+        self.assertFalse(stale.fresh)
+        self.assertEqual(stale.changed_files, ("src/service.ts",))
+
+        await self.atlas.build(self.repo)
+        refreshed = await self.atlas.freshness(self.repo)
+        self.assertTrue(refreshed.fresh)
+        self.assertEqual(refreshed.changed_files, ())
 
     async def test_ambiguous_symbol_requires_qualified_query(self) -> None:
         await self.atlas.build(self.repo)

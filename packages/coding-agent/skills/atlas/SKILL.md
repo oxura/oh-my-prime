@@ -42,10 +42,55 @@ project. If the compiler API is unavailable, Atlas uses an explicit low-
 confidence fallback scanner and marks affected files `fallback`; it never
 presents fallback edges as fully resolved AST evidence.
 
+## Context Compiler
+
+Compile a minimal, task-specific capsule instead of sending a repository dump:
+
+```python
+capsule = await atlas.compile_context(
+    "Fix refresh-token rotation without changing the public API",
+    contract=acceptance_contract,
+    roots=["AuthService.rotateToken"],
+    paths=["tests/auth/"],
+    token_budget=18_000,
+)
+child_context = capsule.render()
+```
+
+The compiler combines explicit roots, task and contract terms, dirty tracked
+files, callers, callees, references, and import neighbors. It ranks those
+signals, merges overlapping source spans, and packs the strongest excerpts
+under the hard token budget. Every item carries:
+
+- its repository-relative source and exact line range;
+- source-file and excerpt SHA-256 hashes;
+- filesystem update time;
+- the reason it was included and its relation to the task;
+- the stable semantic symbol keys represented by the excerpt.
+
+The capsule records aggregated unrelated-file exclusions and explicit
+budget-trimmed excerpts. `capsule.render()` includes the task, acceptance
+contract, evidence metadata, source excerpts, and exclusions in one child-ready
+document.
+
+Capsules are persisted atomically outside the repository. Their IDs attest the
+full payload, and loading rejects a changed payload or a capsule from another
+repository:
+
+```python
+same = await atlas.load_capsule(capsule.id)
+status = await atlas.capsule_freshness(same)
+assert status.fresh
+```
+
+Compilation checks the indexed commit and content hashes first. By default,
+stale tracked sources trigger an automatic graph rebuild. Pass
+`auto_refresh=False` when a stale graph must fail closed instead.
+
 ## Persistence and correctness
 
 The graph is stored outside the repository in a repository-keyed SQLite
-Database. Builds collect all records first and replace the visible graph in one
+database. Builds collect all records first and replace the visible graph in one
 `BEGIN IMMEDIATE` transaction, so readers see either the previous complete
 index or the next complete index, never a half-built graph. Git-ignored files,
 symlinks, binary/invalid UTF-8 source, and source files larger than 2 MiB are not
@@ -53,7 +98,9 @@ parsed as code.
 
 `BuildReport.changed_files` and `removed_files` compare content hashes with the
 previous index. Use `atlas.stats()` to inspect the indexed revision and graph
-cardinality.
+cardinality, and `atlas.freshness()` to compare it with the current tracked
+worktree. An index rebuilt from deliberate dirty changes remains fresh until
+those bytes change again.
 
 ## Query API
 
@@ -62,7 +109,11 @@ cardinality.
 - `await atlas.symbol(query)` — requires one unambiguous match
 - `await atlas.references(symbol, kinds=(...), limit=200)`
 - `await atlas.outgoing(symbol, kinds=(), limit=200)`
+- `await atlas.freshness()`
+- `await atlas.compile_context(task, contract=..., roots=..., paths=...)`
+- `await atlas.load_capsule(capsule_id)`
+- `await atlas.capsule_freshness(capsule)`
 
-Build or refresh the graph before relying on it for a load-bearing refactor.
-Context capsules and stale-index checks are layered on this same content-
-addressed graph.
+Build or refresh the graph before relying on direct graph queries for a
+load-bearing refactor. `compile_context()` performs that freshness check
+automatically.

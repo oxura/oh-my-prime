@@ -6,9 +6,9 @@ import json
 import os
 import sqlite3
 import tempfile
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Sequence
 
 from ._fallback_extractor import parse_typescript_fallback
 from ._models import (
@@ -17,12 +17,12 @@ from ._models import (
     BuildReport,
     Edge,
     FileNode,
+    GraphFreshness,
     GraphStats,
     Language,
     Symbol,
 )
 from ._python_extractor import parse_python
-
 
 _SCHEMA_VERSION = 1
 _MAX_PARSE_BYTES = 2 * 1024 * 1024
@@ -86,7 +86,9 @@ def _default_state_dir() -> Path:
     if override:
         return Path(override).expanduser()
     xdg_state = os.environ.get("XDG_STATE_HOME")
-    root = Path(xdg_state).expanduser() if xdg_state else Path.home() / ".local" / "state"
+    root = (
+        Path(xdg_state).expanduser() if xdg_state else Path.home() / ".local" / "state"
+    )
     return root / "oh-my-prime" / "atlas"
 
 
@@ -143,7 +145,11 @@ class CodeAtlas:
     """Repository semantic graph backed by an atomic SQLite index."""
 
     def __init__(self, state_dir: str | os.PathLike[str] | None = None) -> None:
-        self.state_dir = Path(state_dir).expanduser().resolve() if state_dir else _default_state_dir().resolve()
+        self.state_dir = (
+            Path(state_dir).expanduser().resolve()
+            if state_dir
+            else _default_state_dir().resolve()
+        )
 
     async def build(self, repo: str | os.PathLike[str] = ".") -> BuildReport:
         repo_root, common_dir = await self._repo_paths(repo)
@@ -174,14 +180,24 @@ class CodeAtlas:
                     "parse_status": "not_parsed",
                 }
             )
-            if language in {"python", "typescript", "tsx", "javascript", "jsx"} and size <= _MAX_PARSE_BYTES:
+            if (
+                language in {"python", "typescript", "tsx", "javascript", "jsx"}
+                and size <= _MAX_PARSE_BYTES
+            ):
                 try:
-                    sources[relative] = await asyncio.to_thread(absolute.read_text, encoding="utf-8")
+                    sources[relative] = await asyncio.to_thread(
+                        absolute.read_text, encoding="utf-8"
+                    )
                 except (OSError, UnicodeDecodeError):
                     file_records[-1]["parse_status"] = "encoding_error"
 
-        current_hashes = {str(record["path"]): str(record["content_hash"]) for record in file_records}
-        changed_files = sum(existing_hashes.get(path) != digest for path, digest in current_hashes.items())
+        current_hashes = {
+            str(record["path"]): str(record["content_hash"]) for record in file_records
+        }
+        changed_files = sum(
+            existing_hashes.get(path) != digest
+            for path, digest in current_hashes.items()
+        )
         removed_files = len(set(existing_hashes) - set(current_hashes))
         symbols: list[dict[str, object]] = []
         edges: list[dict[str, object]] = []
@@ -203,10 +219,14 @@ class CodeAtlas:
             if Path(relative).suffix.lower() in _TYPESCRIPT_SUFFIXES
         }
         if typescript_sources:
-            extracted = await self._extract_typescript(repo_root, tuple(typescript_sources))
+            extracted = await self._extract_typescript(
+                repo_root, tuple(typescript_sources)
+            )
             if extracted is None:
                 for relative, source in typescript_sources.items():
-                    fallback_symbols, fallback_edges = parse_typescript_fallback(relative, source)
+                    fallback_symbols, fallback_edges = parse_typescript_fallback(
+                        relative, source
+                    )
                     symbols.extend(fallback_symbols)
                     edges.extend(fallback_edges)
                     status_by_file[relative] = "fallback"
@@ -250,7 +270,59 @@ class CodeAtlas:
 
     async def stats(self, repo: str | os.PathLike[str] = ".") -> GraphStats:
         _, common_dir = await self._repo_paths(repo)
-        return await asyncio.to_thread(self._stats_sync, self._database_path(common_dir))
+        return await asyncio.to_thread(
+            self._stats_sync, self._database_path(common_dir)
+        )
+
+    async def freshness(self, repo: str | os.PathLike[str] = ".") -> GraphFreshness:
+        """Compare the index revision and dirty tracked files with the worktree."""
+        repo_root, common_dir = await self._repo_paths(repo)
+        database_path = self._database_path(common_dir)
+        indexed_head, current_head = await asyncio.gather(
+            asyncio.to_thread(self._indexed_head, database_path),
+            self._git_text(repo_root, "rev-parse", "HEAD"),
+        )
+        current_head = current_head.strip()
+        if indexed_head != current_head:
+            return GraphFreshness(
+                fresh=False,
+                indexed_head=indexed_head,
+                current_head=current_head,
+                changed_files=("HEAD",),
+            )
+        changed_output = await self._git_text(
+            repo_root, "diff", "--name-only", "-z", "HEAD", "--"
+        )
+        candidates = tuple(
+            sorted({path for path in changed_output.split("\0") if path})
+        )
+        if not candidates:
+            return GraphFreshness(
+                fresh=True,
+                indexed_head=indexed_head,
+                current_head=current_head,
+                changed_files=(),
+            )
+        indexed_hashes = await asyncio.to_thread(
+            self._file_hashes, database_path, candidates
+        )
+        stale_paths: list[str] = []
+        for relative in candidates:
+            absolute = repo_root / relative
+            current_hash: str | None = None
+            if absolute.is_file() and not absolute.is_symlink():
+                try:
+                    current_hash = await asyncio.to_thread(_hash_file, absolute)
+                except OSError:
+                    current_hash = None
+            if indexed_hashes.get(relative) != current_hash:
+                stale_paths.append(relative)
+        return GraphFreshness(
+            fresh=not stale_paths,
+            indexed_head=indexed_head,
+            current_head=current_head,
+            changed_files=tuple(stale_paths),
+        )
 
     async def files(
         self,
@@ -300,18 +372,26 @@ class CodeAtlas:
         exact = [
             symbol
             for symbol in matches
-            if symbol.qualified_name == query.strip() or symbol.name == query.strip() or symbol.key == query.strip()
+            if symbol.qualified_name == query.strip()
+            or symbol.name == query.strip()
+            or symbol.key == query.strip()
         ]
         if len(exact) == 1:
             return exact[0]
         if len(exact) > 1:
-            choices = ", ".join(f"{symbol.qualified_name} ({symbol.file}:{symbol.start_line})" for symbol in exact)
+            choices = ", ".join(
+                f"{symbol.qualified_name} ({symbol.file}:{symbol.start_line})"
+                for symbol in exact
+            )
             raise AtlasError(f"ambiguous symbol {query!r}: {choices}")
         if len(matches) == 1:
             return matches[0]
         if not matches:
             raise AtlasError(f"symbol not found: {query}")
-        choices = ", ".join(f"{symbol.qualified_name} ({symbol.file}:{symbol.start_line})" for symbol in matches[:8])
+        choices = ", ".join(
+            f"{symbol.qualified_name} ({symbol.file}:{symbol.start_line})"
+            for symbol in matches[:8]
+        )
         raise AtlasError(f"ambiguous symbol {query!r}: {choices}")
 
     async def references(
@@ -323,7 +403,11 @@ class CodeAtlas:
         repo: str | os.PathLike[str] = ".",
     ) -> list[Edge]:
         self._validate_limit(limit, maximum=2_000)
-        symbol = target if isinstance(target, Symbol) else await self.symbol(target, repo=repo)
+        symbol = (
+            target
+            if isinstance(target, Symbol)
+            else await self.symbol(target, repo=repo)
+        )
         _, common_dir = await self._repo_paths(repo)
         return await asyncio.to_thread(
             self._references_sync,
@@ -342,7 +426,11 @@ class CodeAtlas:
         repo: str | os.PathLike[str] = ".",
     ) -> list[Edge]:
         self._validate_limit(limit, maximum=2_000)
-        symbol = source if isinstance(source, Symbol) else await self.symbol(source, repo=repo)
+        symbol = (
+            source
+            if isinstance(source, Symbol)
+            else await self.symbol(source, repo=repo)
+        )
         _, common_dir = await self._repo_paths(repo)
         return await asyncio.to_thread(
             self._outgoing_sync,
@@ -359,8 +447,12 @@ class CodeAtlas:
     async def _repo_paths(repo: str | os.PathLike[str]) -> tuple[Path, Path]:
         candidate = Path(repo).expanduser().resolve()
         root, common = await asyncio.gather(
-            CodeAtlas._git_text(candidate, "rev-parse", "--path-format=absolute", "--show-toplevel"),
-            CodeAtlas._git_text(candidate, "rev-parse", "--path-format=absolute", "--git-common-dir"),
+            CodeAtlas._git_text(
+                candidate, "rev-parse", "--path-format=absolute", "--show-toplevel"
+            ),
+            CodeAtlas._git_text(
+                candidate, "rev-parse", "--path-format=absolute", "--git-common-dir"
+            ),
         )
         return Path(root.strip()).resolve(), Path(common.strip()).resolve()
 
@@ -409,7 +501,10 @@ class CodeAtlas:
         self,
         repo_root: Path,
         files: tuple[str, ...],
-    ) -> tuple[list[dict[str, object]], list[dict[str, object]], dict[str, str], int] | None:
+    ) -> (
+        tuple[list[dict[str, object]], list[dict[str, object]], dict[str, str], int]
+        | None
+    ):
         script = Path(__file__).with_name("_typescript_extractor.mjs")
         with tempfile.TemporaryDirectory(prefix="atlas-ts-") as directory:
             output_path = Path(directory) / "records.jsonl"
@@ -426,14 +521,20 @@ class CodeAtlas:
                     )
                 except FileNotFoundError:
                     return None
-                _, stderr = await process.communicate("\0".join(files).encode("utf-8", errors="surrogateescape"))
+                _, stderr = await process.communicate(
+                    "\0".join(files).encode("utf-8", errors="surrogateescape")
+                )
             if process.returncode != 0:
                 if process.returncode == 42:
                     return None
                 detail = stderr.decode("utf-8", errors="replace").strip()
-                raise AtlasError(f"TypeScript semantic extractor failed: {detail or 'no output'}")
+                raise AtlasError(
+                    f"TypeScript semantic extractor failed: {detail or 'no output'}"
+                )
             if output_path.stat().st_size > _MAX_EXTRACTOR_OUTPUT_BYTES:
-                raise AtlasError("TypeScript semantic extractor output exceeded 256 MiB")
+                raise AtlasError(
+                    "TypeScript semantic extractor output exceeded 256 MiB"
+                )
             symbols: list[dict[str, object]] = []
             edges: list[dict[str, object]] = []
             statuses: dict[str, str] = {}
@@ -443,9 +544,13 @@ class CodeAtlas:
                     try:
                         record = json.loads(line)
                     except json.JSONDecodeError as error:
-                        raise AtlasError("TypeScript semantic extractor returned invalid JSON") from error
+                        raise AtlasError(
+                            "TypeScript semantic extractor returned invalid JSON"
+                        ) from error
                     if not isinstance(record, dict):
-                        raise AtlasError("TypeScript semantic extractor returned an invalid record")
+                        raise AtlasError(
+                            "TypeScript semantic extractor returned an invalid record"
+                        )
                     record_type = record.get("type")
                     if record_type == "symbol":
                         symbols.append(record)
@@ -455,13 +560,19 @@ class CodeAtlas:
                         file = record.get("file")
                         status = record.get("parse_status")
                         errors = record.get("errors", [])
-                        if isinstance(file, str) and isinstance(status, str) and isinstance(errors, list):
+                        if (
+                            isinstance(file, str)
+                            and isinstance(status, str)
+                            and isinstance(errors, list)
+                        ):
                             statuses[file] = status
                             diagnostics += len(errors)
             return symbols, edges, statuses, diagnostics
 
     @staticmethod
-    def _resolve_python_imports(edges: list[dict[str, object]], files: tuple[str, ...]) -> None:
+    def _resolve_python_imports(
+        edges: list[dict[str, object]], files: tuple[str, ...]
+    ) -> None:
         python_files = [path for path in files if path.endswith(".py")]
         for edge in edges:
             if edge.get("kind") != "imports" or edge.get("target_file"):
@@ -470,14 +581,8 @@ class CodeAtlas:
             if not isinstance(target, str):
                 continue
             suffix = target.lstrip(".").replace(".", "/")
-            matches = [
-                path
-                for path in python_files
-                if path.endswith(f"/{suffix}.py")
-                or path == f"{suffix}.py"
-                or path.endswith(f"/{suffix}/__init__.py")
-                or path == f"{suffix}/__init__.py"
-            ]
+            endings = (f"/{suffix}.py", f"/{suffix}/__init__.py")
+            matches = [path for path in python_files if f"/{path}".endswith(endings)]
             if len(matches) == 1:
                 edge["target_file"] = matches[0]
                 edge["confidence"] = 1.0
@@ -488,7 +593,42 @@ class CodeAtlas:
             return {}
         connection = _connect(database_path, require_existing=True)
         try:
-            return {row["path"]: row["content_hash"] for row in connection.execute("SELECT path, content_hash FROM files")}
+            return {
+                row["path"]: row["content_hash"]
+                for row in connection.execute("SELECT path, content_hash FROM files")
+            }
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _indexed_head(database_path: Path) -> str:
+        connection = _connect(database_path, require_existing=True)
+        try:
+            row = connection.execute(
+                "SELECT value FROM metadata WHERE key = 'head_commit'"
+            ).fetchone()
+            if row is None:
+                raise AtlasNotBuilt(
+                    f"Code Atlas metadata is incomplete: {database_path}"
+                )
+            return str(row["value"])
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _file_hashes(database_path: Path, paths: tuple[str, ...]) -> dict[str, str]:
+        connection = _connect(database_path, require_existing=True)
+        try:
+            hashes: dict[str, str] = {}
+            for offset in range(0, len(paths), 500):
+                batch = paths[offset : offset + 500]
+                placeholders = ",".join("?" for _ in batch)
+                rows = connection.execute(
+                    f"SELECT path, content_hash FROM files WHERE path IN ({placeholders})",
+                    batch,
+                )
+                hashes.update({row["path"]: row["content_hash"] for row in rows})
+            return hashes
         finally:
             connection.close()
 
@@ -522,8 +662,15 @@ class CodeAtlas:
                     for record in files
                 ],
             )
-            file_ids = {row["path"]: row["id"] for row in connection.execute("SELECT id, path FROM files")}
-            unique_symbols = {str(record["key"]): record for record in symbols if record.get("file") in file_ids}
+            file_ids = {
+                row["path"]: row["id"]
+                for row in connection.execute("SELECT id, path FROM files")
+            }
+            unique_symbols = {
+                str(record["key"]): record
+                for record in symbols
+                if record.get("file") in file_ids
+            }
             connection.executemany(
                 """
                 INSERT INTO symbols(
@@ -541,7 +688,9 @@ class CodeAtlas:
                         record["end_line"],
                         int(bool(record["exported"])),
                         record.get("signature_hash")
-                        or hashlib.sha256(str(record.get("signature", "")).encode("utf-8")).hexdigest(),
+                        or hashlib.sha256(
+                            str(record.get("signature", "")).encode("utf-8")
+                        ).hexdigest(),
                     )
                     for key, record in unique_symbols.items()
                 ],
@@ -601,11 +750,15 @@ class CodeAtlas:
             metadata = dict(connection.execute("SELECT key, value FROM metadata"))
             languages = {
                 row["language"]: row["count"]
-                for row in connection.execute("SELECT language, COUNT(*) AS count FROM files GROUP BY language")
+                for row in connection.execute(
+                    "SELECT language, COUNT(*) AS count FROM files GROUP BY language"
+                )
             }
             return GraphStats(
                 files=connection.execute("SELECT COUNT(*) FROM files").fetchone()[0],
-                symbols=connection.execute("SELECT COUNT(*) FROM symbols").fetchone()[0],
+                symbols=connection.execute("SELECT COUNT(*) FROM symbols").fetchone()[
+                    0
+                ],
                 edges=connection.execute("SELECT COUNT(*) FROM edges").fetchone()[0],
                 languages=languages,
                 head_commit=metadata.get("head_commit", ""),
@@ -666,7 +819,7 @@ class CodeAtlas:
                 f"""
                 SELECT s.*, f.path AS file_path
                 FROM symbols s JOIN files f ON f.id = s.file_id
-                WHERE {' AND '.join(clauses)}
+                WHERE {" AND ".join(clauses)}
                 ORDER BY
                     CASE WHEN s.key = ? THEN 0 WHEN s.qualified_name = ? THEN 1 WHEN s.name = ? THEN 2 ELSE 3 END,
                     s.qualified_name, f.path, s.start_line
@@ -769,5 +922,10 @@ class CodeAtlas:
 
     @staticmethod
     def _validate_limit(limit: int, *, maximum: int = 500) -> None:
-        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1 or limit > maximum:
+        if (
+            not isinstance(limit, int)
+            or isinstance(limit, bool)
+            or limit < 1
+            or limit > maximum
+        ):
             raise AtlasError(f"limit must be an integer from 1 to {maximum}")

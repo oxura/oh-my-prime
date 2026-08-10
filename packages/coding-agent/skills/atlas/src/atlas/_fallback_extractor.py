@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import re
 
-
 _DECLARATION = re.compile(
     r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?"
     r"(?:(class|interface|enum|type|function)\s+([A-Za-z_$][\w$]*)|"
@@ -15,7 +14,9 @@ _CALL = re.compile(r"\b([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\(")
 _CALL_KEYWORDS = {"if", "for", "while", "switch", "catch", "function", "return"}
 
 
-def parse_typescript_fallback(path: str, source: str) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+def parse_typescript_fallback(
+    path: str, source: str
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     symbols: list[dict[str, object]] = []
     edges: list[dict[str, object]] = []
     definitions: dict[str, str] = {}
@@ -37,7 +38,9 @@ def parse_typescript_fallback(path: str, source: str) -> tuple[list[dict[str, ob
                 "start_line": line,
                 "end_line": line,
                 "exported": "export" in match.group(0),
-                "signature_hash": hashlib.sha256(match.group(0).strip().encode("utf-8")).hexdigest(),
+                "signature_hash": hashlib.sha256(
+                    match.group(0).strip().encode("utf-8")
+                ).hexdigest(),
             }
         )
     for match in _IMPORT.finditer(source):
