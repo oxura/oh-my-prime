@@ -14,7 +14,7 @@ if [ "$prime_agent_default_release_channel" = "$prime_agent_unconfigured_default
 fi
 prime_agent_release_channel="${PRIME_AGENT_RELEASE_CHANNEL:-$prime_agent_default_release_channel}"
 prime_agent_package="${PRIME_AGENT_PACKAGE:-prime-agent}"
-prime_agent_cmd="${PRIME_AGENT_CMD:-prime-agent}"
+prime_agent_cmd="${PRIME_AGENT_CMD:-ompr}"
 prime_agent_esc=$(printf '\033')
 prime_agent_original_path="${PATH:-}"
 prime_agent_reset="${prime_agent_esc}[0m"

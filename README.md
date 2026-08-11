@@ -45,10 +45,10 @@ Linux child sandboxes also require `ripgrep`, `bubblewrap`, and `socat` from the
 git clone https://github.com/oxura/oh-my-prime.git
 cd oh-my-prime
 npm install
-./prime-agent.sh
+./ompr
 ```
 
-The fork currently retains the upstream `prime-agent` CLI and configuration names. On first launch, use `/login` to configure a subscription or API-key provider.
+Release installs expose the `ompr` command. The repository launcher is `./ompr`; inherited `prime-agent` configuration paths remain unchanged. On first launch, use `/login` to configure a subscription or API-key provider.
 
 ## ProofTree Example
 

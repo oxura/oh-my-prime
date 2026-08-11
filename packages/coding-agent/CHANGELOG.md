@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Added the `ompr` command for launching Oh My Prime from source and release installs.
 - Added isolated Git workspaces with durable manifests, binary-safe diffs, stale-candidate detection, and hash-gated promotion.
 - Added commit-bound acceptance contracts, before/after reproducer gates, deterministic evidence ledgers, and verifier-gated promotion.
 - Added ProofTree exploration with strategy-diverse agents in isolated session workspaces, independent contract verification, deterministic winner selection, recovery, and verifier-gated promotion.

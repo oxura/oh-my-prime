@@ -13,7 +13,7 @@
   Verified recursive coding and research runtime.
 </p>
 
-Oh My Prime is a fork of [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) that adds ProofTree exploration, deterministic verifier-gated promotion, semantic model routing, repository intelligence, evidence-backed continual learning, durable workflows, and fail-closed child capability manifests. The fork currently retains inherited `@earendil-works/pi-*` package identifiers, the `pi` manifest key, and the `prime-agent` command. See the [repository README](../../README.md) for the verified runtime architecture and end-to-end examples.
+Oh My Prime is a fork of [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) that adds ProofTree exploration, deterministic verifier-gated promotion, semantic model routing, repository intelligence, evidence-backed continual learning, durable workflows, and fail-closed child capability manifests. The fork retains inherited `@earendil-works/pi-*` package identifiers and configuration paths, while release installs expose the `ompr` command. See the [repository README](../../README.md) for the verified runtime architecture and end-to-end examples.
 
 ## Table of Contents
 
@@ -54,20 +54,20 @@ On Linux, install the child-sandbox prerequisites first: `ripgrep`, `bubblewrap`
 git clone https://github.com/oxura/oh-my-prime.git
 cd oh-my-prime
 npm install
-OH_MY_PRIME="$(pwd)/prime-agent.sh"
+./ompr
 ```
 
 Authenticate with an API key:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-"$OH_MY_PRIME"
+./ompr
 ```
 
 Or use your existing subscription:
 
 ```bash
-"$OH_MY_PRIME"
+./ompr
 /login  # Then select provider
 ```
 

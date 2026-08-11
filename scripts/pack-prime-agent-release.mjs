@@ -22,7 +22,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const defaultOutputDir = join(root, "packages", "coding-agent", "release");
 const defaultBaseUrl = process.env.PRIME_AGENT_DOWNLOAD_BASE_URL;
 const publicPackageName = process.env.PRIME_AGENT_PACKAGE_NAME || "prime-agent";
-const publicCommandName = process.env.PRIME_AGENT_CMD || "prime-agent";
+const publicCommandName = process.env.PRIME_AGENT_CMD || "ompr";
 const releaseChannels = new Set(["stable", "beta"]);
 
 const releasePackages = [
