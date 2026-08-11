@@ -130,7 +130,7 @@ import {
 	type TelemetryOnboardingOutcome,
 } from "../../core/telemetry.js";
 import { type TruncationResult, truncateTail } from "../../core/tools/truncate.js";
-import { PRIME_BUTTERFLY_LOGO } from "../../themes/prime-logo.js";
+import { OH_MY_PRIME_LOGO } from "../../themes/oh-my-prime-logo.js";
 import { getChangelogPath, parseChangelog } from "../../utils/changelog.js";
 import { copyToClipboard } from "../../utils/clipboard.js";
 import { readClipboardImage } from "../../utils/clipboard-image.js";
@@ -416,7 +416,7 @@ export class BrandSplashHeader implements Component {
 		private readonly verboseInstructions?: string,
 		private readonly options: BrandSplashHeaderOptions = {},
 	) {
-		this.logoRaw = (options.logo ?? PRIME_BUTTERFLY_LOGO).split("\n");
+		this.logoRaw = (options.logo ?? OH_MY_PRIME_LOGO).split("\n");
 		this.logoCanvasWidth = this.logoRaw.reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
 	}
 

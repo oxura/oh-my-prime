@@ -53,7 +53,7 @@ describe("LoginDialogComponent", () => {
 		dialog.showAuth("https://example.com/oauth?client_id=test", "Complete login in your browser.");
 		const output = stripAnsi(dialog.render(88).join("\n"));
 
-		expect(output).toContain("Login to Anthropic");
+		expect(output).toContain("LOGIN TO ANTHROPIC");
 		expect(output).toContain("Browser sign-in");
 		expect(output).toContain("Sign-in link");
 		expect(output).toContain("https://example.com/oauth?client_id=test");
@@ -212,7 +212,7 @@ describe("LoginDialogComponent", () => {
 		void dialog.showPrompt("Enter API key:");
 		const output = stripAnsi(dialog.render(88).join("\n"));
 
-		expect(output).toContain("Login to OpenAI");
+		expect(output).toContain("LOGIN TO OPENAI");
 		expect(output).toContain("Enter API key:");
 		expect(output).not.toContain("─");
 		expect(output).not.toContain("> ");

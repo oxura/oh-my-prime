@@ -4,6 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import { PrimeOnboardingSplashComponent } from "../src/modes/interactive/components/prime-onboarding-splash.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
+import { OH_MY_PRIME_LOGO } from "../src/themes/oh-my-prime-logo.js";
 import { PRIME_BUTTERFLY_LOGO } from "../src/themes/prime-logo.js";
 
 describe("PrimeOnboardingSplashComponent", () => {
@@ -60,7 +61,8 @@ describe("PrimeOnboardingSplashComponent", () => {
 		expect(output).not.toContain("→");
 		expect(output).not.toContain("Use a subscription");
 		expect(output).not.toContain("Use an API key");
-		expect(output).toContain(PRIME_BUTTERFLY_LOGO.split("\n")[0].trim());
+		expect(output).toContain(OH_MY_PRIME_LOGO.split("\n")[0].trim());
+		expect(output).not.toContain(PRIME_BUTTERFLY_LOGO.split("\n")[0].trim());
 		for (const line of lines) {
 			expect(visibleWidth(line)).toBeLessThanOrEqual(100);
 		}
@@ -141,7 +143,7 @@ describe("PrimeOnboardingSplashComponent", () => {
 			{ getRows: () => 40 },
 		);
 		const rendered = component.render(60).map((line) => stripAnsi(line));
-		const logoLine = rendered.find((line) => line.includes(PRIME_BUTTERFLY_LOGO.split("\n")[0].trim()));
+		const logoLine = rendered.find((line) => line.includes(OH_MY_PRIME_LOGO.split("\n")[0].trim()));
 		const brandLine = rendered.find((line) => line.includes("OH MY PRIME"));
 		const hintLine = rendered.find((line) => line.includes("Press Enter to connect a model"));
 

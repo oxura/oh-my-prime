@@ -9,6 +9,7 @@ import {
 	START_HINTS,
 } from "../src/modes/interactive/interactive-mode.js";
 import { getMarkdownTheme, initTheme } from "../src/modes/interactive/theme/theme.js";
+import { OH_MY_PRIME_LOGO } from "../src/themes/oh-my-prime-logo.js";
 
 describe("InteractiveMode startup hints", () => {
 	beforeAll(() => {
@@ -51,6 +52,7 @@ describe("InteractiveMode startup hints", () => {
 		expect(lines[0]).toBe("");
 		expect(output).toContain("OH MY PRIME");
 		expect(output).toContain("VERIFIED RECURSIVE AGENT RUNTIME");
+		expect(output).toContain(OH_MY_PRIME_LOGO.split("\n")[0].trim());
 		expect(output).toContain("version  v0.0.0");
 		expect(output).toContain("model    test-model");
 		expect(output).toContain("cwd      /tmp/project");
@@ -79,8 +81,7 @@ describe("InteractiveMode startup hints", () => {
 		const lines = header.render(72);
 		const output = stripAnsi(lines.join("\n"));
 
-		expect(output).toContain("VERIFIED AGENT RUNTIME");
-		expect(output).not.toContain("VERIFIED RECURSIVE AGENT RUNTIM");
+		expect(output).toContain("VERIFIED RECURSIVE AGENT RUNTIME");
 		expect(output).not.toContain('Try "refactor');
 		for (const line of lines) {
 			expect(visibleWidth(line)).toBeLessThanOrEqual(72);

@@ -346,7 +346,7 @@ prime_agent_content_height() {
 }
 
 prime_agent_show_logo() {
-	[ "$prime_agent_screen_layout_show_logo" = 1 ] && [ "$prime_agent_screen_compact" != 1 ] && [ "$prime_agent_screen_render_lab_width" -ge 32 ]
+	[ "$prime_agent_screen_layout_show_logo" = 1 ] && [ "$prime_agent_screen_compact" != 1 ] && [ "$prime_agent_screen_render_lab_width" -ge 29 ]
 }
 
 prime_agent_content_line() {
@@ -410,8 +410,8 @@ prime_agent_set_lab_line() {
 
 	logo_line=$(prime_agent_logo_line "$lab_row")
 	if [ -n "$logo_line" ]; then
-		logo_start=$(((prime_agent_lab_width - 32) / 2))
-		logo_end=$((logo_start + 32))
+		logo_start=$(((prime_agent_lab_width - 29) / 2))
+		logo_end=$((logo_start + 29))
 		left=$(prime_agent_lab_background_range "$lab_row" 0 "$logo_start")
 		right=$(prime_agent_lab_background_range "$lab_row" "$logo_end" "$prime_agent_lab_width")
 		trace="${left}${prime_agent_color_text}${logo_line}${prime_agent_reset}${right}"
@@ -427,16 +427,17 @@ prime_agent_set_lab_line() {
 
 prime_agent_logo_line() {
 	case "$1" in
-		2) printf '                          ▄▄███▀' ;;
-		3) printf '    ▄▄▄▄▄              ▄█████▀' ;;
-		4) printf '    ██████▄         ▄██████▀' ;;
-		5) printf '   ▄███▀███▄     ▄███▀▄██▀' ;;
-		6) printf '   ███ ▄████▄▄▄████▀▄▄██' ;;
-		7) printf '  ▀██  ▀█████████▀▀▀▀▀▀' ;;
-		8) printf '  ▄██   ██████▀▀ ▄███' ;;
-		9) printf ' █████    ▀█▄▄▄█████▀' ;;
-		10) printf '███████▄  ████████▀' ;;
-		11) printf '▀███▀▀    █████▀' ;;
+		2) printf '▄▄▄         ▄▄▄         ▄▄▄' ;;
+		3) printf '█████       █████       █████' ;;
+		4) printf '▀███▀       ▀███▀       ▀███▀' ;;
+		5) printf '  ▀██▄        █        ▄██▀' ;;
+		6) printf '    ▀██▄      █      ▄██▀' ;;
+		7) printf '      ▀██▄  ▄███▄  ▄██▀' ;;
+		8) printf '        ▀███████████▀' ;;
+		9) printf '            ███' ;;
+		10) printf '           ▄███▄' ;;
+		11) printf '          ▄█████▄' ;;
+		12) printf '           ▀███▀' ;;
 	esac
 }
 
