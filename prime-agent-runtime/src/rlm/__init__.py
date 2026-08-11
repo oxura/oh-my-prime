@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 import types
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
-from .harness import HarnessEntry, HarnessScope, HarnessState, RefinementEvent, get_harness_state
+from .harness import (
+    HarnessEntry,
+    HarnessScope,
+    HarnessState,
+    RefinementEvent,
+    get_harness_state,
+)
 
 try:
     from ipykernel.comm import Comm
@@ -25,6 +33,39 @@ HOST_COMM_TARGET = "host.request"
 
 
 @dataclass(frozen=True)
+class RLMFilesystemCapabilities:
+    read: tuple[Path, ...]
+    write: tuple[Path, ...]
+
+
+@dataclass(frozen=True)
+class RLMNetworkCapabilities:
+    allow: tuple[str, ...]
+    deny_by_default: bool
+
+
+@dataclass(frozen=True)
+class RLMSecretCapabilities:
+    allow: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RLMProcessCapabilities:
+    cpu: int | None = None
+    memory_bytes: int | None = None
+    wall_time_ms: int | None = None
+    max_processes: int | None = None
+
+
+@dataclass(frozen=True)
+class RLMCapabilityManifest:
+    filesystem: RLMFilesystemCapabilities
+    network: RLMNetworkCapabilities
+    secrets: RLMSecretCapabilities
+    process: RLMProcessCapabilities
+
+
+@dataclass(frozen=True)
 class RLMSpawnHandle:
     rlm_child_id: str
     name: str
@@ -32,6 +73,7 @@ class RLMSpawnHandle:
     model: str
     cwd: Path
     effort: str
+    capabilities: RLMCapabilityManifest
 
 
 @dataclass(frozen=True)
@@ -53,6 +95,7 @@ class RLMModel:
     context_window: int
     max_tokens: int
     cost: RLMModelCost
+
 
 @dataclass(frozen=True)
 class RLMRouteResolution:
@@ -83,6 +126,7 @@ class RLMSubagent:
     session_name: str
     session_dir: Path
     status: str
+    usage_tokens: int | None = None
 
 
 def _install_control_comm_handlers() -> None:
@@ -99,6 +143,90 @@ def _install_control_comm_handlers() -> None:
     control_handlers.setdefault("comm_close", comm_manager.comm_close)
 
 
+def _capability_strings(value: Any, label: str) -> tuple[str, ...]:
+    if (
+        not isinstance(value, list)
+        or any(not isinstance(item, str) or not item for item in value)
+        or len(value) != len(set(value))
+    ):
+        raise RuntimeError(f"rlm.run returned invalid {label}")
+    return tuple(value)
+
+
+def _capability_record(
+    value: Any,
+    *,
+    label: str,
+    required: set[str],
+    optional: set[str] | None = None,
+) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise RuntimeError(f"rlm.run returned invalid {label}")
+    allowed = required | (optional or set())
+    if set(value) - allowed or not required.issubset(value):
+        raise RuntimeError(f"rlm.run returned invalid {label}")
+    return value
+
+
+def _capabilities_from_payload(value: Any) -> RLMCapabilityManifest:
+    payload = _capability_record(
+        value,
+        label="capability manifest",
+        required={"filesystem", "network", "secrets", "process"},
+    )
+    filesystem = _capability_record(
+        payload["filesystem"],
+        label="filesystem capabilities",
+        required={"read", "write"},
+    )
+    network = _capability_record(
+        payload["network"],
+        label="network capabilities",
+        required={"allow", "deny_by_default"},
+    )
+    secrets = _capability_record(
+        payload["secrets"],
+        label="secret capabilities",
+        required={"allow"},
+    )
+    process = _capability_record(
+        payload["process"],
+        label="process capabilities",
+        required=set(),
+        optional={"cpu", "memory_bytes", "wall_time_ms", "max_processes"},
+    )
+    reads = _capability_strings(filesystem["read"], "filesystem read capabilities")
+    writes = _capability_strings(filesystem["write"], "filesystem write capabilities")
+    domains = _capability_strings(network["allow"], "network capabilities")
+    secret_names = _capability_strings(secrets["allow"], "secret capabilities")
+    if network["deny_by_default"] is not True:
+        raise RuntimeError("rlm.run returned invalid network capabilities")
+    if any(
+        re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) is None for name in secret_names
+    ):
+        raise RuntimeError("rlm.run returned invalid secret capabilities")
+    limits: dict[str, int | None] = {}
+    for key in ("cpu", "memory_bytes", "wall_time_ms", "max_processes"):
+        limit = process.get(key)
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0
+        ):
+            raise RuntimeError("rlm.run returned invalid process capabilities")
+        limits[key] = limit
+    return RLMCapabilityManifest(
+        filesystem=RLMFilesystemCapabilities(
+            read=tuple(Path(path) for path in reads),
+            write=tuple(Path(path) for path in writes),
+        ),
+        network=RLMNetworkCapabilities(
+            allow=domains,
+            deny_by_default=True,
+        ),
+        secrets=RLMSecretCapabilities(allow=secret_names),
+        process=RLMProcessCapabilities(**limits),
+    )
+
+
 def _spawn_handle_from_payload(payload: Any) -> RLMSpawnHandle:
     if not isinstance(payload, dict):
         raise RuntimeError("rlm.run returned an invalid spawn handle")
@@ -108,6 +236,7 @@ def _spawn_handle_from_payload(payload: Any) -> RLMSpawnHandle:
     model = payload.get("model")
     cwd = payload.get("cwd")
     effort = payload.get("effort")
+    capabilities = payload.get("capabilities")
     if not all(
         isinstance(value, str) and value
         for value in (child_id, name, session_dir, model, cwd, effort)
@@ -120,10 +249,13 @@ def _spawn_handle_from_payload(payload: Any) -> RLMSpawnHandle:
         model=model,
         cwd=Path(cwd),
         effort=effort,
+        capabilities=_capabilities_from_payload(capabilities),
     )
 
 
-async def host_request(request_type: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+async def host_request(
+    request_type: str, payload: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Send a typed request to the Prime Agent host and await its reply.
 
     This is the kernel side of the generic host bridge: Python skills call
@@ -151,6 +283,7 @@ async def host_request(request_type: str, payload: dict[str, Any] | None = None)
 
         status = reply.get("status")
         if status == "ok":
+
             def _resolve_result() -> None:
                 if not future.done():
                     future.set_result({k: v for k, v in reply.items() if k != "status"})
@@ -160,6 +293,7 @@ async def host_request(request_type: str, payload: dict[str, Any] | None = None)
             return
         if status == "error":
             message = reply.get("error") or f"host request {request_type} failed"
+
             def _resolve_error() -> None:
                 if not future.done():
                     future.set_exception(RuntimeError(str(message)))
@@ -168,7 +302,10 @@ async def host_request(request_type: str, payload: dict[str, Any] | None = None)
             loop.call_soon_threadsafe(_resolve_error)
             return
 
-        unexpected = f"host request {request_type} returned unexpected status: {status!r}"
+        unexpected = (
+            f"host request {request_type} returned unexpected status: {status!r}"
+        )
+
         def _resolve_unexpected() -> None:
             if not future.done():
                 future.set_exception(RuntimeError(unexpected))
@@ -187,7 +324,7 @@ async def run(prompt: str, **kwargs: Any) -> RLMSpawnHandle:
 
     ``model`` selects an exact ``provider/model`` selector. ``route`` asks the
     installed Model Mesh resolver for a selector. ``cwd`` selects an existing
-    working directory for the child's complete session runtime.
+    working directory and ``capabilities`` bounds the child runtime.
     """
     if not isinstance(prompt, str):
         raise TypeError(f"prompt must be str, got {type(prompt).__name__}")
@@ -208,7 +345,9 @@ async def run(prompt: str, **kwargs: Any) -> RLMSpawnHandle:
             not isinstance(resolution, RLMRouteResolution)
             or not isinstance(resolution.model, str)
             or not resolution.model
-            or (resolution.effort is not None and not isinstance(resolution.effort, str))
+            or (
+                resolution.effort is not None and not isinstance(resolution.effort, str)
+            )
         ):
             raise RuntimeError("Model Mesh returned an invalid route resolution")
         spawn_kwargs["model"] = resolution.model
@@ -231,7 +370,8 @@ def _model_from_payload(payload: Any) -> RLMModel:
     max_tokens = payload.get("maxTokens")
     cost = payload.get("cost")
     valid_strings = all(
-        isinstance(value, str) and value for value in (provider, model_id, name, selector)
+        isinstance(value, str) and value
+        for value in (provider, model_id, name, selector)
     )
     valid_input = (
         isinstance(input_types, list)
@@ -292,7 +432,9 @@ async def find_models(query: str = "", limit: int = 8) -> list[RLMModel]:
     return [_model_from_payload(model) for model in models]
 
 
-def _subagent_from_payload(payload: Any, operation: str = "rlm.list_subagents") -> RLMSubagent:
+def _subagent_from_payload(
+    payload: Any, operation: str = "rlm.list_subagents"
+) -> RLMSubagent:
     if not isinstance(payload, dict):
         raise RuntimeError(f"{operation} returned an invalid subagent entry")
     child_id = payload.get("rlm_child_id")
@@ -301,6 +443,7 @@ def _subagent_from_payload(payload: Any, operation: str = "rlm.list_subagents") 
     session_name = payload.get("session_name")
     session_dir = payload.get("session_dir")
     status = payload.get("status")
+    usage_tokens = payload.get("usage_tokens")
     if not isinstance(child_id, str) or not child_id:
         raise RuntimeError(f"{operation} entry is missing rlm_child_id")
     if active_session_id is not None and not isinstance(active_session_id, str):
@@ -313,6 +456,12 @@ def _subagent_from_payload(payload: Any, operation: str = "rlm.list_subagents") 
         raise RuntimeError(f"{operation} entry is missing session_dir")
     if status not in {"running", "completed", "error"}:
         raise RuntimeError(f"{operation} entry has invalid status")
+    if usage_tokens is not None and (
+        isinstance(usage_tokens, bool)
+        or not isinstance(usage_tokens, int)
+        or usage_tokens < 0
+    ):
+        raise RuntimeError(f"{operation} entry has invalid usage_tokens")
     return RLMSubagent(
         rlm_child_id=child_id,
         active_session_id=active_session_id,
@@ -320,6 +469,7 @@ def _subagent_from_payload(payload: Any, operation: str = "rlm.list_subagents") 
         session_name=session_name,
         session_dir=Path(session_dir),
         status=status,
+        usage_tokens=usage_tokens,
     )
 
 
@@ -341,7 +491,9 @@ async def delete_subagent(target: str | RLMSubagent) -> RLMSubagent:
         if not selector:
             raise ValueError("target must not be empty")
     else:
-        raise TypeError(f"target must be str or RLMSubagent, got {type(target).__name__}")
+        raise TypeError(
+            f"target must be str or RLMSubagent, got {type(target).__name__}"
+        )
     payload = await host_request("rlm.delete_subagent", {"target": selector})
     return _subagent_from_payload(payload.get("subagent"), "rlm.delete_subagent")
 
@@ -372,8 +524,8 @@ class _HarnessProxy:
                     _HarnessProxy._unpersisted = HarnessState(
                         in_memory=True,
                         local_write_error=(
-                            f"{exc} This session has no persistent local harness store; "
-                            "pass global_=True to persist across sessions."
+                            f"{exc} This session has no persistent local harness store. "
+                            "Configure a local store; cross-session activation requires Evolution Lab."
                         ),
                     )
                 return _HarnessProxy._unpersisted
@@ -435,9 +587,14 @@ __all__ = [
     "McpIntegration",
     "McpToolError",
     "NotEnabled",
-    "RLMModelCost",
-    "RLMRouteResolution",
+    "RLMCapabilityManifest",
+    "RLMFilesystemCapabilities",
     "RLMModel",
+    "RLMModelCost",
+    "RLMNetworkCapabilities",
+    "RLMProcessCapabilities",
+    "RLMRouteResolution",
+    "RLMSecretCapabilities",
     "RLMSpawnHandle",
     "RLMSubagent",
     "RefinementEvent",
@@ -446,8 +603,8 @@ __all__ = [
     "get_harness_state",
     "harness",
     "host_request",
-    "register_model_route_resolver",
     "list_subagents",
+    "register_model_route_resolver",
     "rlm",
     "run",
 ]
@@ -457,7 +614,7 @@ __all__ = [
 _LAZY_MCP = {"McpIntegration", "McpToolError", "NotEnabled"}
 
 
-def __getattr__(name: str) -> Any:  # noqa: D401 - module-level lazy attr hook
+def __getattr__(name: str) -> Any:
     if name in _LAZY_MCP:
         from . import mcp_base
 

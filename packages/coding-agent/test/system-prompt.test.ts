@@ -76,13 +76,13 @@ describe("buildRlmPrompt", () => {
 				"",
 				"Python state in the kernel, by contrast, persists across cells: named variables, helper functions, classes, imports, notes, parsed outputs, and helper data structures all remain available in every later turn. Tool calls are themselves Python `await` expressions, so their return values can be bound to variables and composed into program logic just like any other call.",
 				"",
-				"Continual harness state is available as `rlm.harness` and `rlm.get_harness_state()`. CRUD calls are local to this Prime Agent session by default: `rlm.harness.create_memory(...)`, `rlm.harness.update_memory(...)`, `rlm.harness.delete_memory(...)`, `rlm.harness.create_skill(...)`, `rlm.harness.update_skill(...)`, `rlm.harness.delete_skill(...)`, `rlm.harness.create_subagent(...)`, `rlm.harness.update_subagent(...)`, `rlm.harness.delete_subagent(...)`, `rlm.harness.create_prompt_note(...)`, `rlm.harness.update_prompt_note(...)`, `rlm.harness.delete_prompt_note(...)`, plus `rlm.harness.record_refinement(...)` and `rlm.harness.overview()`. Use `global_=True` only for stable cross-session lessons; Python reserves `global`, so literal `global=True` is invalid syntax.",
+				"Continual harness state is available as `rlm.harness` and `rlm.get_harness_state()`. CRUD calls are local to this Prime Agent session by default: `rlm.harness.create_memory(...)`, `rlm.harness.update_memory(...)`, `rlm.harness.delete_memory(...)`, `rlm.harness.create_skill(...)`, `rlm.harness.update_skill(...)`, `rlm.harness.delete_skill(...)`, `rlm.harness.create_subagent(...)`, `rlm.harness.update_subagent(...)`, `rlm.harness.delete_subagent(...)`, `rlm.harness.create_prompt_note(...)`, `rlm.harness.update_prompt_note(...)`, `rlm.harness.delete_prompt_note(...)`, plus `rlm.harness.record_refinement(...)` and `rlm.harness.overview()`. Global CRUD may use `global_=True`. Creating or updating global technical memory is rejected and must use the `evolve` skill for proof-backed activation. Direct global prompt, skill, and subagent CRUD remains supported, including stable user preference prompt entries. Active Evolution memory cannot be directly deleted; use `evolve.rollback`.",
 				"",
 				"Terminology: continual harness names the persisted prompt, memory, skill, and subagent layer; RLM names the runtime, IPython kernel, and native call interface exposed to the model.",
 				"",
 				"RLM-native call contract: installed Python skills are pre-imported modules. Read the matching SKILL.md and call its documented function, such as `await <skill_import>.<function>(...)`; when a CLI exists, use `<skill_import> ...` from shell. Continual harness skill entries are Python REPL skills with an explicit Python `reference` and `arguments` contract. Spawn a reusable delegation spec with `await rlm('sub-task')`; admission returns a child handle immediately. Results arrive only through an available messaging capability or files, never as an `rlm()` return value. Do not invent non-native wrappers such as `call_skill(...)` or `run_subagent(...)`.",
 				"",
-				"Treat continual harness refinement as a small, evidence-backed update after observing a repeated failure or reusable tactic: diagnose the issue, update the smallest relevant continual harness component, validate on the next action, then record the outcome. Use `await refine.run()` to turn repeated delegation patterns into reusable subagent specs, repeated procedures into skills, durable facts/preferences into memories, and narrow behavioral policies into prompt addendums. It returns immediately and runs when the current turn ends, so continue working normally after calling it. Do not rewrite the whole continual harness when a focused memory, skill, prompt note, or subagent spec is enough.",
+				"Treat continual harness refinement as a small, evidence-backed update after observing a repeated failure or reusable tactic: diagnose the issue, update the smallest relevant continual harness component, validate on the next action, then record the outcome. Use `await refine.run()` to turn repeated delegation patterns into reusable subagent specs, repeated procedures into skills, durable technical facts into memories, and stable user preferences or narrow behavioral policies into prompt addendums. It returns immediately and runs when the current turn ends, so continue working normally after calling it. Do not rewrite the whole continual harness when a focused memory, skill, prompt note, or subagent spec is enough.",
 			].join("\n"),
 		);
 	});
@@ -358,8 +358,10 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).toContain("# Continual Harness State");
 		expect(prompt).toContain("Local continual harness entries belong to this Prime Agent session");
 		expect(prompt).toContain("The continual harness entries below are compact summaries, not full descriptions");
-		expect(prompt).toContain("Use global continual harness refinement only for stable cross-session lessons");
+		expect(prompt).toContain("Global technical memory creates and updates require Evolution Lab");
+		expect(prompt).toContain("stable user preference prompt entries");
 		expect(prompt).toContain("When to call `await refine.run()`");
+		expect(prompt).toContain("proof-backed candidate through `evolve`, replay, shadow, and promotion");
 		expect(prompt).toContain("Call contract: read each installed Python skill's SKILL.md");
 		expect(prompt).toContain("Continual harness skill entries are Python REPL skills");
 		expect(prompt).toContain("Spawn a continual harness subagent spec by composing a concise task prompt");
@@ -375,7 +377,7 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).toContain("a reusable tactic emerges");
 		expect(prompt).toContain("a repeated delegation role should become a subagent spec");
 		expect(prompt).toContain("a repeated procedure should become a skill");
-		expect(prompt).toContain("a durable fact/preference should become a memory");
+		expect(prompt).toContain("a local task fact or temporary blocker should become session memory");
 		expect(prompt).toContain("a narrow behavioral policy should become a prompt addendum");
 		expect(prompt).toContain("validation shows a continual harness entry is wrong");
 		expect(prompt).toContain("[global:focused_edits] Focused edits (policy, v1)");

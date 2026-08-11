@@ -100,6 +100,11 @@ import {
 } from "../../core/cron-jobs.js";
 import { ORPHAN_PROCESS_JOURNAL_ENV } from "../../core/orphan-process-journal.js";
 import { PromptAdmissionCancelledError, waitForPromptAdmission } from "../../core/prompt-admission.js";
+import {
+	loadPersistedRlmCapabilityManifest,
+	normalizeRlmCapabilityManifest,
+	type RlmCapabilityManifest,
+} from "../../core/rlm-capabilities.js";
 import type { CreateRlmSubagentRuntimeOptions, SubagentRuntimeHost } from "../../core/rlm-runtime.js";
 import {
 	canPassivateSession,
@@ -387,8 +392,10 @@ interface PersistedRlmSubagentRegistryEntry {
 	rlmParentNodeId?: string;
 	prompt?: string;
 	spawnCode?: string;
+	capabilities?: RlmCapabilityManifest;
 	model?: { provider: string; modelId: string };
 	status: "running" | "completed" | "deleted";
+	usageTokens?: number;
 	createdAt: number;
 	updatedAt: string;
 }
@@ -925,7 +932,9 @@ export class AgentDaemon {
 			rlmParentNodeId?: string;
 			prompt?: string;
 			spawnCode?: string;
+			capabilities: RlmCapabilityManifest;
 			model?: { provider: string; modelId: string };
+			usageTokens?: number;
 			status: PersistedRlmSubagentRegistryEntry["status"];
 			createdAt?: number;
 		},
@@ -944,7 +953,9 @@ export class AgentDaemon {
 			...(input.rlmParentNodeId ? { rlmParentNodeId: input.rlmParentNodeId } : {}),
 			...(input.prompt ? { prompt: input.prompt } : {}),
 			...(input.spawnCode ? { spawnCode: input.spawnCode } : {}),
+			capabilities: input.capabilities,
 			...(input.model ? { model: input.model } : {}),
+			...(input.usageTokens !== undefined ? { usageTokens: input.usageTokens } : {}),
 			status: input.status,
 			createdAt: input.createdAt ?? Date.now(),
 			updatedAt: new Date().toISOString(),
@@ -1015,7 +1026,9 @@ export class AgentDaemon {
 					typeof entry.sessionFile !== "string" ||
 					(entry.status !== "running" && entry.status !== "completed" && entry.status !== "deleted") ||
 					(entry.rlmDepth !== undefined && (!Number.isSafeInteger(entry.rlmDepth) || entry.rlmDepth < 0)) ||
-					(entry.rlmMaxDepth !== undefined && (!Number.isSafeInteger(entry.rlmMaxDepth) || entry.rlmMaxDepth < 0))
+					(entry.rlmMaxDepth !== undefined &&
+						(!Number.isSafeInteger(entry.rlmMaxDepth) || entry.rlmMaxDepth < 0)) ||
+					(entry.usageTokens !== undefined && (!Number.isSafeInteger(entry.usageTokens) || entry.usageTokens < 0))
 				) {
 					continue;
 				}
@@ -2210,7 +2223,7 @@ export class AgentDaemon {
 	private createSubagentRuntimeHost(parentState: ActiveSessionState): SubagentRuntimeHost {
 		return {
 			createRlmSubagentRuntime: async (options) => this.createRlmSubagentRuntime(parentState, options),
-			completeRlmSubagentRuntime: (childId, session) => {
+			completeRlmSubagentRuntime: (childId, session, usageTokens) => {
 				const state = [...this.sessions.values()].find(
 					(candidate) =>
 						candidate.runtime.metadata.kind === "subagent" &&
@@ -2222,6 +2235,10 @@ export class AgentDaemon {
 				if (state.runtime.metadata.rehydratedCompleted) return true;
 				const metadata = state.runtime.metadata;
 				const model = session.model;
+				const capabilities = session.capabilities;
+				if (!capabilities) {
+					throw new Error(`RLM subagent ${childId} is missing its capability manifest`);
+				}
 				return this.recordRlmSubagentRegistryEntry(parentState, {
 					childId,
 					sessionName: session.sessionName ?? childId,
@@ -2233,6 +2250,8 @@ export class AgentDaemon {
 					prompt: metadata.prompt && metadata.prompt.length <= 4096 ? metadata.prompt : undefined,
 					spawnCode: metadata.spawnCode,
 					...(model ? { model: { provider: model.provider, modelId: model.id } } : {}),
+					capabilities,
+					...(usageTokens !== undefined ? { usageTokens } : {}),
 					status: "completed",
 					createdAt: metadata.createdAt,
 				});
@@ -2304,7 +2323,7 @@ export class AgentDaemon {
 		parentState: ActiveSessionState,
 		options: CreateRlmSubagentRuntimeOptions,
 	): Promise<AgentSessionRuntime> {
-		const sessionManager = SessionManager.create(options.parentSession.sessionManager.getCwd(), options.sessionDir);
+		const sessionManager = SessionManager.create(options.cwd, options.sessionDir);
 		sessionManager.newSession({
 			parentSession: options.parentSession.sessionFile,
 			rlmDepth: options.rlmDepth,
@@ -2328,6 +2347,7 @@ export class AgentDaemon {
 					customTools: options.customTools,
 					includeGoals: options.includeGoals,
 					includeCompactSkill: options.includeCompactSkill,
+					capabilities: options.capabilities,
 					agentMessageController: this.createAgentMessageController(() => stateRef),
 					agentObserveController: this.createAgentObserveController(() => stateRef),
 					rlmHeartbeatController: {
@@ -2389,6 +2409,10 @@ export class AgentDaemon {
 					runtime.session.setSessionName(options.sessionName);
 				}
 				if (runtime.session.sessionFile) {
+					const capabilities = runtime.session.capabilities;
+					if (!capabilities) {
+						throw new Error(`RLM subagent ${options.id} is missing its capability manifest`);
+					}
 					this.recordRlmSubagentRegistryEntry(parentState, {
 						childId: options.id,
 						sessionName: options.sessionName,
@@ -2399,6 +2423,7 @@ export class AgentDaemon {
 						rlmParentNodeId: options.rlmParentNodeId,
 						prompt: options.prompt.length <= 4096 ? options.prompt : undefined,
 						spawnCode: options.spawnCode,
+						capabilities,
 						model: {
 							provider: options.model.provider,
 							modelId: options.model.id,
@@ -2700,6 +2725,19 @@ export class AgentDaemon {
 		try {
 			sessionLease = acquireSessionLease(entry.sessionFile, parentState.runtime.services.agentDir);
 			const sessionManager = await SessionManager.openAsync(entry.sessionFile, entry.sessionDir);
+			const cwd = sessionManager.getCwd();
+			const parentCapabilities = parentState.runtime.session.capabilities;
+			const registryCapabilities =
+				entry.capabilities === undefined
+					? undefined
+					: normalizeRlmCapabilityManifest(entry.capabilities, cwd, parentCapabilities);
+			const persistedCapabilities = loadPersistedRlmCapabilityManifest(entry.sessionDir, cwd);
+			if (!persistedCapabilities && !registryCapabilities) {
+				throw new Error(`RLM subagent ${entry.childId} is missing its capability attestation`);
+			}
+			const capabilities = persistedCapabilities
+				? normalizeRlmCapabilityManifest(persistedCapabilities, cwd, parentCapabilities)
+				: registryCapabilities!;
 			const modelRegistry = parentState.runtime.services.modelRegistry;
 			let rehydratedModel: Model<Api> | undefined;
 			if (entry.model) {
@@ -2747,6 +2785,7 @@ export class AgentDaemon {
 							},
 						},
 						rlmSessionDir: entry.sessionDir,
+						capabilities,
 						// Registry depth is authoritative (written at spawn); for legacy entries
 						// without it, the shared accessor resolves persisted header depth or the
 						// session file's sub- path before the depth-1 default.
@@ -2788,7 +2827,16 @@ export class AgentDaemon {
 			);
 			// The session transcript is authoritative for mutable metadata such as a
 			// later user-assigned name; the registry value is only the spawn snapshot.
-			if (!parentState.runtime.session.registerRlmChildSession(entry.childId, runtime.session)) {
+			const retained =
+				entry.usageTokens === undefined
+					? parentState.runtime.session.registerRlmChildSession(entry.childId, runtime.session)
+					: parentState.runtime.session.registerRlmChildSession(
+							entry.childId,
+							runtime.session,
+							undefined,
+							entry.usageTokens,
+						);
+			if (!retained) {
 				await this.closeSession(state, "replaced");
 				throw new RuntimeOpenCancelledError();
 			}
@@ -4941,6 +4989,7 @@ export class AgentDaemon {
 				status: "inactive",
 				rlmChildId: entry.childId,
 				rlmChildRegistryStatus: entry.status,
+				...(entry.usageTokens !== undefined ? { rlmChildUsageTokens: entry.usageTokens } : {}),
 				sessionDir: entry.sessionDir,
 				sessionPath: entry.sessionFile,
 			});

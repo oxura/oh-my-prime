@@ -3,7 +3,7 @@ name = "oh-my-prime-evolution-lab"
 version = "0.1.0"
 description = "Proof-backed continual harness evolution for Oh My Prime"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["oh-my-prime-prove", "oh-my-prime-workspace"]
 
 [build-system]
 requires = ["hatchling"]

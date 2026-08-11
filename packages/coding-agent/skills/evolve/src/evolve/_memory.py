@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+from prove import ProofError, ProofRuntime, VerificationReport
+
 from ._models import (
     CandidateNotFound,
     DecayReport,
@@ -48,6 +50,7 @@ _HALF_LIFE_DAYS = {
     "hypothesis": 30.0,
     "temporary_observation": 7.0,
 }
+_MIN_ACTIVE_CONFIDENCE = 0.5
 
 
 def _default_state_root() -> Path:
@@ -82,6 +85,7 @@ class EvolutionLab:
         state_dir: str | os.PathLike[str] | None = None,
         *,
         clock: Callable[[], datetime] | None = None,
+        proof_runtime: ProofRuntime | None = None,
     ) -> None:
         self.state_root = (
             Path(state_dir).expanduser().resolve()
@@ -89,6 +93,7 @@ class EvolutionLab:
             else _default_state_root().resolve()
         )
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._proof_runtime = proof_runtime or ProofRuntime()
 
     async def attest(
         self,
@@ -113,48 +118,40 @@ class EvolutionLab:
             captured_at=self._now_text(),
         )
 
-    async def attest_verification(self, report: object) -> EvidenceRef:
-        """Attest a persisted `prove` report only when its status is verified."""
-        report_path = getattr(report, "report_path", report)
-        path = self._regular_file(report_path)
+    async def attest_verification(
+        self,
+        report: VerificationReport,
+        *,
+        repo: str | os.PathLike[str] = ".",
+    ) -> EvidenceRef:
+        """Attest an integrity-checked persisted `prove` report."""
+        if not isinstance(report, VerificationReport):
+            raise EvidenceError(
+                "verification evidence must be a VerificationReport returned by prove.run"
+            )
         try:
-            payload = json.loads(
-                await asyncio.to_thread(path.read_text, encoding="utf-8")
-            )
-        except json.JSONDecodeError as error:
+            persisted = await self._proof_runtime.load_report(report.id, repo=repo)
+            persisted.require_verified()
+        except ProofError as error:
             raise EvidenceError(
-                f"verification report is invalid JSON: {path}"
+                f"verification report is not trusted: {error}"
             ) from error
-        if not isinstance(payload, dict) or payload.get("status") != "verified":
-            raise EvidenceError("verification report status must be 'verified'")
-        report_id = payload.get("id")
-        contract_id = payload.get("contract_id")
-        contract_digest = payload.get("contract_digest")
-        if not all(
-            isinstance(value, str) and value
-            for value in (report_id, contract_id, contract_digest)
-        ):
+        if persisted != report:
             raise EvidenceError(
-                "verification report is missing attested identity fields"
+                "verification report differs from the persisted verifier ledger"
             )
-        required_results = [
-            item
-            for item in payload.get("gate_results", [])
-            if isinstance(item, dict) and item.get("required") is True
-        ]
-        if not required_results or any(
-            item.get("passed") is not True for item in required_results
-        ):
+        if persisted.required_gates_passed < 1:
             raise EvidenceError(
                 "verification report has no complete required-gate proof"
             )
+        path = self._regular_file(persisted.report_path)
         digest = await asyncio.to_thread(_sha256_file, path)
         return EvidenceRef(
             uri=path.as_uri(),
             sha256=digest,
             kind="verification_report",
             verified=True,
-            verifier=f"prove:{contract_id}:{report_id}",
+            verifier=f"prove:{persisted.contract_id}:{persisted.id}",
             captured_at=self._now_text(),
         )
 
@@ -183,7 +180,7 @@ class EvolutionLab:
         path = self._text(path, "path")
         confidence = self._confidence(confidence)
         evidence = self._evidence_sequence(evidence)
-        await self._validate_evidence_set(evidence)
+        await self._validate_evidence_set(evidence, repo=repo)
         verified_count = sum(item.verified for item in evidence)
         if category in {"verified_knowledge", "known_error"} and verified_count == 0:
             raise EvidenceError(f"{category} requires a verified deterministic report")
@@ -298,9 +295,16 @@ class EvolutionLab:
         _, common_dir, _ = await self._repo(repo)
         return await asyncio.to_thread(self._store(common_dir).stats)
 
-    async def freshness(self, candidate: MemoryCandidate) -> MemoryFreshness:
+    async def freshness(
+        self,
+        candidate: MemoryCandidate,
+        *,
+        for_activation: bool = False,
+    ) -> MemoryFreshness:
         if not isinstance(candidate, MemoryCandidate):
             raise TypeError("candidate must be a MemoryCandidate")
+        if not isinstance(for_activation, bool):
+            raise TypeError("for_activation must be a boolean")
         now = self._now()
         expired = (
             candidate.expires_at is not None
@@ -320,7 +324,7 @@ class EvolutionLab:
         invalid_evidence: list[str] = []
         for item in candidate.evidence:
             try:
-                await asyncio.to_thread(self._validate_evidence_sync, item)
+                await self._validate_evidence(item, repo=candidate.repo_root)
             except FileNotFoundError:
                 missing_evidence.append(item.uri)
             except EvidenceError:
@@ -337,6 +341,11 @@ class EvolutionLab:
             reasons.append("evidence artifact or verification status is invalid")
         if candidate.status in {"rejected", "rolled_back", "expired", "invalidated"}:
             reasons.append(f"candidate status is {candidate.status}")
+        if candidate.status == "active" or for_activation:
+            if candidate.metadata.get("rollback_required") is True:
+                reasons.append("memory is marked for rollback")
+            if effective < _MIN_ACTIVE_CONFIDENCE:
+                reasons.append("effective confidence is below active threshold")
         return MemoryFreshness(
             fresh=not reasons,
             effective_confidence=effective,
@@ -358,7 +367,7 @@ class EvolutionLab:
         evidence = self._evidence_sequence(evidence)
         if not evidence:
             raise EvidenceError("confirmation requires evidence")
-        await self._validate_evidence_set(evidence)
+        await self._validate_evidence_set(evidence, repo=repo)
         if not any(item.verified for item in evidence):
             raise EvidenceError("confirmation requires verified evidence")
         candidate, store = await self._candidate_and_store(candidate_id, repo)
@@ -395,24 +404,46 @@ class EvolutionLab:
         evidence = self._evidence_sequence(evidence)
         if not evidence or not any(item.verified for item in evidence):
             raise EvidenceError("contradiction requires verified evidence")
-        await self._validate_evidence_set(evidence)
+        await self._validate_evidence_set(evidence, repo=repo)
         candidate, store = await self._candidate_and_store(candidate_id, repo)
+        reason = self._text(reason, "reason")
         confidence = max(0.0, candidate.confidence - 0.2)
-        status = "invalidated" if confidence < 0.5 else candidate.status
+        updated_at = self._now_text()
         updated = replace(
             candidate,
             revision=candidate.revision + 1,
             evidence=(*candidate.evidence, *evidence),
             confidence=confidence,
             contradictions=candidate.contradictions + 1,
+            updated_at=updated_at,
+        )
+        effective_confidence = self._effective_confidence(updated, self._now())
+        rollback_required = updated.status == "active" and effective_confidence < 0.5
+        status = (
+            "invalidated"
+            if confidence < 0.5 and updated.status != "active"
+            else updated.status
+        )
+        updated = replace(
+            updated,
             status=status,
-            updated_at=self._now_text(),
+            metadata={
+                **updated.metadata,
+                **(
+                    {
+                        "rollback_required": True,
+                        "rollback_reason": reason,
+                    }
+                    if rollback_required
+                    else {}
+                ),
+            },
         )
         return await asyncio.to_thread(
             store.update,
             updated,
             action="contradict",
-            reason=self._text(reason, "reason"),
+            reason=reason,
             evidence=evidence,
         )
 
@@ -426,17 +457,27 @@ class EvolutionLab:
         candidate, store = await self._candidate_and_store(candidate_id, repo)
         if candidate.status in {"rolled_back", "rejected", "expired", "invalidated"}:
             return candidate
+        reason = self._text(reason, "reason")
+        active = candidate.status == "active"
         updated = replace(
             candidate,
             revision=candidate.revision + 1,
-            status="invalidated",
+            status=candidate.status if active else "invalidated",
+            metadata={
+                **candidate.metadata,
+                **(
+                    {"rollback_required": True, "rollback_reason": reason}
+                    if active
+                    else {}
+                ),
+            },
             updated_at=self._now_text(),
         )
         return await asyncio.to_thread(
             store.update,
             updated,
             action="invalidate",
-            reason=self._text(reason, "reason"),
+            reason=reason,
         )
 
     async def decay(self, *, repo: str | os.PathLike[str] = ".") -> DecayReport:
@@ -444,7 +485,7 @@ class EvolutionLab:
         expired_ids: list[str] = []
         invalidated_ids: list[str] = []
         for candidate in candidates:
-            if candidate.status not in {"candidate", "shadow", "active"}:
+            if candidate.status not in {"candidate", "shadow"}:
                 continue
             freshness = await self.freshness(candidate)
             if freshness.fresh:
@@ -500,9 +541,38 @@ class EvolutionLab:
         candidate = await asyncio.to_thread(store.get, self._candidate_id(candidate_id))
         return candidate, store
 
-    async def _validate_evidence_set(self, evidence: Sequence[EvidenceRef]) -> None:
+    async def _validate_evidence_set(
+        self,
+        evidence: Sequence[EvidenceRef],
+        *,
+        repo: str | os.PathLike[str],
+    ) -> None:
         for item in evidence:
-            await asyncio.to_thread(self._validate_evidence_sync, item)
+            await self._validate_evidence(item, repo=repo)
+
+    async def _validate_evidence(
+        self,
+        evidence: EvidenceRef,
+        *,
+        repo: str | os.PathLike[str],
+    ) -> None:
+        await asyncio.to_thread(self._validate_evidence_sync, evidence)
+        if not evidence.verified:
+            return
+        report_id = evidence.verifier.rsplit(":", 1)[-1]
+        try:
+            report = await self._proof_runtime.load_report(report_id, repo=repo)
+            report.require_verified()
+        except (ProofError, OSError) as error:
+            raise EvidenceError(
+                f"verification ledger is invalid: {report_id}"
+            ) from error
+        expected_verifier = f"prove:{report.contract_id}:{report.id}"
+        if (
+            evidence.verifier != expected_verifier
+            or report.report_path.resolve().as_uri() != evidence.uri
+        ):
+            raise EvidenceError("verification evidence does not match its ledger")
 
     @staticmethod
     def _validate_evidence_sync(evidence: EvidenceRef) -> None:
@@ -525,21 +595,7 @@ class EvolutionLab:
                 raise EvidenceError(
                     "only persisted prove reports may be marked verified"
                 )
-            try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError as error:
-                raise EvidenceError(
-                    f"verified evidence is invalid JSON: {path}"
-                ) from error
-            if not isinstance(payload, dict) or payload.get("status") != "verified":
-                raise EvidenceError("verified evidence no longer has verified status")
-            required = [
-                item
-                for item in payload.get("gate_results", [])
-                if isinstance(item, dict) and item.get("required") is True
-            ]
-            if not required or any(item.get("passed") is not True for item in required):
-                raise EvidenceError("verified evidence has incomplete required gates")
+            return
 
     @staticmethod
     def _evidence_path(uri: str) -> Path:

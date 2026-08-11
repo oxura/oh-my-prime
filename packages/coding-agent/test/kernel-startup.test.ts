@@ -38,4 +38,32 @@ describe("KernelManager startup", () => {
 			await manager.dispose();
 		}
 	});
+
+	it("uses the configured process wrapper for direct spawn instead of falling back unsandboxed", async () => {
+		const wrapper = join(tempDir, "sandbox-wrapper");
+		writeExecutable(wrapper, ["#!/bin/sh", 'echo "sandbox wrapper invoked" >&2', "exit 73", ""].join("\n"));
+		let wrappedLaunch = false;
+		const manager = new KernelManager({
+			python: "/nonexistent/unsandboxed-python",
+			cwd: tempDir,
+			processWrapper: (launch) => {
+				wrappedLaunch = true;
+				expect(launch.command).toBe("/nonexistent/unsandboxed-python");
+				expect(launch.args).toContain("-m");
+				expect(launch.args).toContain("ipykernel_launcher");
+				return { command: wrapper, args: [] };
+			},
+		});
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		try {
+			await expect(manager.execute("print(1)")).rejects.toThrow(
+				/Kernel exited before resolving ports[\s\S]*sandbox wrapper invoked/,
+			);
+			expect(wrappedLaunch).toBe(true);
+		} finally {
+			errorSpy.mockRestore();
+			await manager.dispose();
+		}
+	});
 });

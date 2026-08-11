@@ -7,16 +7,17 @@
   </a>
 </p>
 
-<h1 align="center">Prime Agent CLI</h1>
+<h1 align="center">Oh My Prime CLI</h1>
 
 <p align="center">
-  RLM-native terminal coding and research harness.
+  Verified recursive coding and research runtime.
 </p>
 
-Prime Agent began as a hard fork of [pi-mono](https://github.com/badlogic/pi-mono), but it is now developed and distributed independently. This workspace retains inherited `@earendil-works/pi-*` source package identifiers, the `pi` package manifest key, and a source-package `pi` bin entry for internal compatibility. Public releases are currently versioned tarball artifacts installed by the scripts below; release packaging rewrites the application package and command to `prime-agent`. Do not use the inherited npm package as the Prime Agent install path.
+Oh My Prime is a fork of [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) that adds ProofTree exploration, deterministic verifier-gated promotion, semantic model routing, repository intelligence, evidence-backed continual learning, durable workflows, and fail-closed child capability manifests. The fork currently retains inherited `@earendil-works/pi-*` package identifiers, the `pi` manifest key, and the `prime-agent` command. See the [repository README](../../README.md) for the verified runtime architecture and end-to-end examples.
 
 ## Table of Contents
 
+- [Oh My Prime Runtime](#oh-my-prime-runtime)
 - [Quick Start](#quick-start)
 - [Providers & Models](#providers--models)
 - [Interactive Mode](#interactive-mode)
@@ -40,33 +41,37 @@ Prime Agent began as a hard fork of [pi-mono](https://github.com/badlogic/pi-mon
 - [Upstream](#upstream)
 - [CLI Reference](#cli-reference)
 
+## Oh My Prime Runtime
+
+The core loop is `Explore -> Prove -> Promote -> Learn`. Python modules for `workspace`, `prove`, `prime`, `models`, `atlas`, `evolve`, and `flow` are available through the persistent IPython control plane. RLM children run with immutable capability manifests; nested children may narrow their parent's filesystem, network, secret, and process grants but cannot widen them.
+
+Start with the [ProofTree](skills/prime/SKILL.md), [Verifier Fabric](skills/prove/SKILL.md), [Flow Runtime](skills/flow/SKILL.md), and [RLM capability](docs/rlm.md) documentation.
+
 ## Quick Start
+On Linux, install the child-sandbox prerequisites first: `ripgrep`, `bubblewrap`, and `socat`.
 
 ```bash
-curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh
-```
-
-To install the beta built from the latest commit on `main`:
-
-```bash
-curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh -s -- beta
+git clone https://github.com/oxura/oh-my-prime.git
+cd oh-my-prime
+npm install
+OH_MY_PRIME="$(pwd)/prime-agent.sh"
 ```
 
 Authenticate with an API key:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-prime-agent
+"$OH_MY_PRIME"
 ```
 
 Or use your existing subscription:
 
 ```bash
-prime-agent
+"$OH_MY_PRIME"
 /login  # Then select provider
 ```
 
-Then just talk to Prime Agent. By default, Prime Agent gives the model one tool: `ipython`. The model uses the persistent kernel to read files, run commands, edit code, and inspect data. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [Prime Agent packages](#prime-agent-packages).
+Then talk to Oh My Prime. By default, the top-level model receives one tool: `ipython`. It uses the persistent kernel to read files, run commands, edit code, inspect data, and orchestrate capability-constrained children. Add capabilities through [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [Prime Agent packages](#prime-agent-packages).
 
 The Python kernel runtime is set up automatically on first invocation. Set `PRIME_AGENT_KERNEL_PYTHON` to use an existing Python environment with `ipykernel`.
 

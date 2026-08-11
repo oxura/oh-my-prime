@@ -5,6 +5,7 @@ import type { Api, Model, ServiceTier } from "@earendil-works/pi-ai";
 import type { AgentSession } from "./agent-session.js";
 import type { ToolDefinition } from "./extensions/index.js";
 import type { HostRequestHandler } from "./kernel/index.js";
+import type { RlmCapabilityManifest } from "./rlm-capabilities.js";
 
 export interface RlmRunRequest {
 	prompt: string;
@@ -20,6 +21,7 @@ export interface RlmSpawnHandle {
 	model: string;
 	cwd: string;
 	effort: ThinkingLevel;
+	capabilities: RlmCapabilityManifest;
 }
 
 export type RlmSubagentRegistryStatus = "running" | "completed" | "error";
@@ -31,6 +33,7 @@ export interface RlmSubagentRegistryEntry {
 	session_name: string;
 	session_dir: string;
 	status: RlmSubagentRegistryStatus;
+	usage_tokens?: number | null;
 }
 
 export interface RlmListSubagentsResult {
@@ -269,6 +272,7 @@ export interface CreateRlmSubagentRuntimeOptions {
 	sessionName: string;
 	sessionDir: string;
 	cwd: string;
+	capabilities: RlmCapabilityManifest;
 	model: Model<any>;
 	thinkingLevel: ThinkingLevel;
 	serviceTier: ServiceTier;
@@ -290,7 +294,7 @@ export interface CreateRlmSubagentRuntimeOptions {
 export interface SubagentRuntimeHost {
 	createRlmSubagentRuntime(options: CreateRlmSubagentRuntimeOptions): Promise<RlmSubagentRuntime>;
 	/** Persist host-owned completion before the child becomes passivation-eligible. */
-	completeRlmSubagentRuntime?(childId: string, session: AgentSession): boolean;
+	completeRlmSubagentRuntime?(childId: string, session: AgentSession, usageTokens?: number): boolean;
 	/** Release a host-owned child after its detached initial task settles. */
 	releaseRlmSubagentRuntime?: (
 		runtime: RlmSubagentRuntime,

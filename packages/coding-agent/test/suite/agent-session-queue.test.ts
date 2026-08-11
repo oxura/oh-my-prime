@@ -846,6 +846,7 @@ describe("AgentSession queue characterization", () => {
 			editId: "local:shared",
 			refineOptions: { instructions: "update the local shared memory" },
 			updatedContent: "Updated local content",
+			expectApplied: true,
 			expectLocalContent: "Updated local content" as string | undefined,
 			expectGlobalContent: "Global content" as string | undefined,
 		},
@@ -856,16 +857,18 @@ describe("AgentSession queue characterization", () => {
 			editId: "global:shared",
 			refineOptions: { instructions: "update local memory" },
 			updatedContent: "Updated local content",
+			expectApplied: true,
 			expectLocalContent: "Updated local content" as string | undefined,
 			expectGlobalContent: undefined as string | undefined,
 		},
 		{
-			name: "global display prefixes before applying global refine edits",
+			name: "global display prefixes before applying direct global prompt edits",
 			seedGlobal: true,
 			seedLocal: false,
 			editId: "global:shared",
-			refineOptions: { instructions: "update the global shared memory", global: true },
+			refineOptions: { instructions: "update the global shared prompt", global: true },
 			updatedContent: "Updated global content",
+			expectApplied: true,
 			expectLocalContent: undefined as string | undefined,
 			expectGlobalContent: "Updated global content" as string | undefined,
 		},
@@ -879,6 +882,7 @@ describe("AgentSession queue characterization", () => {
 			updatedContent,
 			expectLocalContent,
 			expectGlobalContent,
+			expectApplied,
 		}) => {
 			const harness = await createAutoRefineHarness();
 			harnesses.push(harness);
@@ -895,10 +899,11 @@ describe("AgentSession queue characterization", () => {
 							summary: `${scope} shared memory`,
 							rationale: "seed",
 							expectedOutcome: "seeded",
-							edits: [{ action: "create", kind: "memory", id: "shared", title: "Shared", content }],
+							edits: [{ action: "create", kind: "prompt", id: "shared", title: "Shared", content }],
 						},
-						{ id: `seed_${scope}`, scope },
+						{ id: `seed_${scope}`, scope: "local" },
 					);
+					if (scope === "global") state.entries.prompt.shared.scope = "global";
 					saveHarnessState(dir, state);
 				};
 				if (seedGlobal) seedMemory("global", globalDir, "Global content");
@@ -910,7 +915,7 @@ describe("AgentSession queue characterization", () => {
 							rationale: "The display id was selected from merged state.",
 							expectedOutcome: "Only the targeted entry changes.",
 							edits: [
-								{ action: "update", kind: "memory", id: editId, title: "Shared", content: updatedContent },
+								{ action: "update", kind: "prompt", id: editId, title: "Shared", content: updatedContent },
 							],
 						}),
 					),
@@ -918,13 +923,13 @@ describe("AgentSession queue characterization", () => {
 
 				const result = await harness.session.refine(refineOptions);
 
-				expect(result.appliedEdits[0]).toMatchObject({ id: "shared", applied: true });
+				expect(result.appliedEdits[0]).toMatchObject({ id: "shared", applied: expectApplied });
 				if (expectLocalContent !== undefined) {
-					expect(loadHarnessState(localDir, "local").entries.memory.shared.content).toBe(expectLocalContent);
-					expect(loadHarnessState(localDir, "local").entries.memory["global:shared"]).toBeUndefined();
+					expect(loadHarnessState(localDir, "local").entries.prompt.shared.content).toBe(expectLocalContent);
+					expect(loadHarnessState(localDir, "local").entries.prompt["global:shared"]).toBeUndefined();
 				}
 				if (expectGlobalContent !== undefined) {
-					expect(loadHarnessState(globalDir, "global").entries.memory.shared.content).toBe(expectGlobalContent);
+					expect(loadHarnessState(globalDir, "global").entries.prompt.shared.content).toBe(expectGlobalContent);
 				}
 			} finally {
 				if (previousAgentDir === undefined) {

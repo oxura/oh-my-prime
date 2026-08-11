@@ -25,6 +25,7 @@ import type { LoadExtensionsResult } from "../src/core/extensions/index.js";
 import { type HostRequestHandlers, KernelManager } from "../src/core/kernel/index.js";
 import { convertToLlm } from "../src/core/messages.js";
 import { ModelRegistry } from "../src/core/model-registry.js";
+import type { RlmCapabilityManifest } from "../src/core/rlm-capabilities.js";
 import {
 	createDefaultRlmSubagentSessionName,
 	createRlmDeleteSubagentHostHandler,
@@ -131,6 +132,14 @@ interface InspectableRlmSession {
 	_rlmChildCleanupFailures: Map<string, Awaited<ReturnType<AgentSession["listRlmSubagents"]>>["subagents"][number]>;
 	_rlmChildSessions: Map<string, AgentSession>;
 	_rlmChildUnsubscribes: Map<string, () => void>;
+	_ipythonKernelProvisioner?: {
+		options?: {
+			inheritEnv?: boolean;
+			transport?: "tcp" | "ipc";
+			processWrapper?: unknown;
+			resourceLimits?: unknown;
+		};
+	};
 	_createKernelHostHandlers(): HostRequestHandlers;
 	_reapDeletedRlmSubagentRuntimesAfterCompaction(): Promise<void>;
 }
@@ -258,11 +267,14 @@ describe("AgentSession rlm recursion", () => {
 			sessionManager?: SessionManager;
 			settingsManager?: SettingsManager;
 			extensionsResult?: LoadExtensionsResult;
+			cwd?: string;
+			capabilities?: RlmCapabilityManifest;
 		} = {},
 	): AgentSession {
 		const authStorage = AuthStorage.create(join(tempDir, "auth.json"));
 		authStorage.setRuntimeApiKey("anthropic", "test-key");
-		const sessionManager = options.sessionManager ?? SessionManager.create(tempDir, join(tempDir, "sessions"));
+		const sessionManager =
+			options.sessionManager ?? SessionManager.create(options.cwd ?? tempDir, join(tempDir, "sessions"));
 		const settingsManager = options.settingsManager ?? SettingsManager.create(tempDir, tempDir);
 
 		const agent = new Agent({
@@ -281,7 +293,7 @@ describe("AgentSession rlm recursion", () => {
 			agent,
 			sessionManager,
 			settingsManager,
-			cwd: tempDir,
+			cwd: options.cwd ?? tempDir,
 			modelRegistry: ModelRegistry.create(authStorage, join(tempDir, "models.json")),
 			resourceLoader: createTestResourceLoader({
 				extensionsResult: options.extensionsResult,
@@ -307,6 +319,7 @@ describe("AgentSession rlm recursion", () => {
 			agentMessageController: options.agentMessageController,
 			subagentRuntimeHost: options.subagentRuntimeHost,
 			customTools: options.customTools,
+			capabilities: options.capabilities,
 			rlmDepth: options.depth,
 			rlmMaxDepth: options.maxDepth,
 			rlmSessionDir: options.rlmSessionDir,
@@ -414,6 +427,73 @@ describe("AgentSession rlm recursion", () => {
 		await expect(root.runRlmChild("invalid effort", { effort: "extreme" })).rejects.toThrow(
 			"rlm.run effort must be one of",
 		);
+	});
+
+	it("admits capabilities and passes the exact canonical manifest through runtime creation", async () => {
+		const workspace = join(tempDir, "capability-workspace");
+		mkdirSync(workspace);
+		let createdWith: RlmCapabilityManifest | undefined;
+		let createdChild: AgentSession | undefined;
+		const root = createSession({
+			subagentRuntimeHost: {
+				createRlmSubagentRuntime: async (options) => {
+					createdWith = options.capabilities;
+					createdChild = createSession({
+						cwd: options.cwd,
+						rlmSessionDir: options.sessionDir,
+						capabilities: options.capabilities,
+					});
+					return { session: createdChild };
+				},
+				deleteRlmSubagentRuntime: async (_id, child) => child?.disposeAsync(),
+			},
+		});
+
+		const run = (root as unknown as InspectableRlmSession)._createKernelHostHandlers()["rlm.run"];
+		if (!run) throw new Error("Missing rlm.run host handler");
+		const spawned = await run({
+			prompt: "run with a bounded sandbox",
+			kwargs: {
+				cwd: workspace,
+				capabilities: {
+					network: false,
+					secrets: { allow: [] },
+					process: {
+						memory_bytes: "4gb",
+						wall_time_ms: "20m",
+						max_processes: 8,
+					},
+				},
+			},
+		});
+		const expected = {
+			filesystem: { read: [workspace], write: [workspace] },
+			network: { allow: [], deny_by_default: true },
+			secrets: { allow: [] },
+			process: {
+				memory_bytes: 4 * 1024 * 1024 * 1024,
+				wall_time_ms: 20 * 60 * 1000,
+				max_processes: 8,
+			},
+		};
+
+		expect(spawned.capabilities).toEqual(expected);
+		await waitFor(() => createdWith !== undefined && createdChild !== undefined);
+		expect(createdWith).toEqual(expected);
+		if (!createdChild) throw new Error("Runtime host did not publish the capability child");
+		expect(createdChild.capabilities).toEqual(expected);
+		const inspectableChild = createdChild as unknown as InspectableRlmSession;
+		const provisioner = inspectableChild._ipythonKernelProvisioner;
+		expect(provisioner?.options).toMatchObject({
+			inheritEnv: false,
+			transport: "ipc",
+			processWrapper: expect.any(Function),
+			resourceLimits: {
+				memoryBytes: 4 * 1024 * 1024 * 1024,
+				wallTimeMs: 20 * 60 * 1000,
+				maxProcesses: 8,
+			},
+		});
 	});
 
 	it("creates readable collision-resistant default subagent session names", () => {
@@ -1403,7 +1483,7 @@ describe("AgentSession rlm recursion", () => {
 
 		const spawned = await root.runRlmChild("persist completion");
 		await vi.waitFor(() => {
-			expect(completeRlmSubagentRuntime).toHaveBeenCalledWith(spawned.rlm_child_id, child);
+			expect(completeRlmSubagentRuntime).toHaveBeenCalledWith(spawned.rlm_child_id, child, 10);
 		});
 		expect((await root.listRlmSubagents()).subagents).toContainEqual(
 			expect.objectContaining({ rlm_child_id: spawned.rlm_child_id, status: "completed" }),
@@ -1505,6 +1585,7 @@ describe("AgentSession rlm recursion", () => {
 					session_name: expectedSessionName,
 					session_dir: result.session_dir,
 					status: "completed",
+					usage_tokens: 10,
 				},
 			],
 		};
@@ -1564,6 +1645,7 @@ describe("AgentSession rlm recursion", () => {
 						parentActiveSessionId: "parent-active",
 						rlmChildId: `${name}-child`,
 						rlmChildRegistryStatus: registryStatus,
+						rlmChildUsageTokens: name === "finished" ? 13 : 5,
 						sessionDir: join(tempDir, `${name}-child`),
 					})),
 				}),
@@ -1586,6 +1668,7 @@ describe("AgentSession rlm recursion", () => {
 				session_name: "failed-worker",
 				session_dir: join(tempDir, "failed-child"),
 				status: "error" as const,
+				usage_tokens: 5,
 			},
 			{
 				rlm_child_id: "finished-child",
@@ -1594,6 +1677,7 @@ describe("AgentSession rlm recursion", () => {
 				session_name: "finished-worker",
 				session_dir: join(tempDir, "finished-child"),
 				status: "completed" as const,
+				usage_tokens: 13,
 			},
 		];
 
@@ -1757,6 +1841,7 @@ describe("AgentSession rlm recursion", () => {
 					session_name: createDefaultRlmSubagentSessionName("slow shard", rootRun.id),
 					session_dir: rootRun.sessionDir,
 					status: "running",
+					usage_tokens: 0,
 				},
 			],
 		});
@@ -3040,6 +3125,12 @@ describe("AgentSession rlm recursion", () => {
 						model: "test/model",
 						cwd: tempDir,
 						effort: "off",
+						capabilities: {
+							filesystem: { read: [tempDir], write: [tempDir] },
+							network: { allow: [], deny_by_default: true },
+							secrets: { allow: [] },
+							process: { wall_time_ms: 1_200_000, max_processes: 64 },
+						},
 					};
 				}),
 			},

@@ -7,27 +7,44 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-
 SKILLS_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = SKILLS_ROOT.parents[2]
 sys.path.insert(0, str(REPO_ROOT / "prime-agent-runtime" / "src"))
 sys.path.insert(0, str(SKILLS_ROOT / "workspace" / "src"))
 sys.path.insert(0, str(SKILLS_ROOT / "prove" / "src"))
+sys.path.insert(0, str(SKILLS_ROOT / "evolve" / "src"))
 sys.path.insert(0, str(SKILLS_ROOT / "prime" / "src"))
 
-from prime import (  # noqa: E402
+from evolve import EvolutionLab
+from prime import (
     ExplorationStartError,
     ExplorationTimeout,
     NoVerifiedCandidate,
     ProofTreeRuntime,
 )
-from prove import ProofRuntime, Requirement, command  # noqa: E402
-from rlm import RLMSpawnHandle  # noqa: E402
-from workspace import WorkspaceManager  # noqa: E402
+from prove import ProofRuntime, Requirement, command
+from rlm import (
+    RLMCapabilityManifest,
+    RLMFilesystemCapabilities,
+    RLMNetworkCapabilities,
+    RLMProcessCapabilities,
+    RLMSecretCapabilities,
+    RLMSpawnHandle,
+)
+from workspace import WorkspaceManager
+
+TEST_CAPABILITIES = RLMCapabilityManifest(
+    filesystem=RLMFilesystemCapabilities(read=(Path("."),), write=(Path("."),)),
+    network=RLMNetworkCapabilities(allow=(), deny_by_default=True),
+    secrets=RLMSecretCapabilities(allow=()),
+    process=RLMProcessCapabilities(wall_time_ms=1_200_000, max_processes=64),
+)
 
 
 class FakeRlm:
-    def __init__(self, on_spawn=None, *, fail_after: int | None = None, running: bool = False) -> None:
+    def __init__(
+        self, on_spawn=None, *, fail_after: int | None = None, running: bool = False
+    ) -> None:
         self.on_spawn = on_spawn
         self.fail_after = fail_after
         self.running = running
@@ -54,6 +71,7 @@ class FakeRlm:
             model=str(kwargs.get("model") or "fake/model"),
             cwd=cwd,
             effort=str(kwargs.get("effort") or "off"),
+            capabilities=TEST_CAPABILITIES,
         )
 
     async def list_subagents(self):
@@ -89,8 +107,7 @@ class ProofTreeRuntimeTest(unittest.IsolatedAsyncioTestCase):
         result = subprocess.run(
             ("git", "-C", str(self.repo), *args),
             check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             text=True,
         )
         return result.stdout.rstrip("\n")
@@ -114,7 +131,9 @@ class ProofTreeRuntimeTest(unittest.IsolatedAsyncioTestCase):
             repo=self.repo,
         )
 
-    async def test_explores_isolated_strategies_and_promotes_smallest_verified_patch(self) -> None:
+    async def test_explores_isolated_strategies_and_promotes_smallest_verified_patch(
+        self,
+    ) -> None:
         def implement(prompt: str, cwd: Path, _index: int) -> None:
             if "Strategy (root-cause)" in prompt:
                 (cwd / "app.txt").write_text("fixed\n", encoding="utf-8")
@@ -136,11 +155,34 @@ class ProofTreeRuntimeTest(unittest.IsolatedAsyncioTestCase):
         run = await runtime.explore("Fix app.txt", contract=contract, candidates=3)
         winner = await run.best_verified(max_parallel=2)
 
-        self.assertEqual(len({str(candidate.workspace.path) for candidate in run.candidates}), 3)
-        self.assertTrue(all(Path(str(kwargs["cwd"])).is_dir() for _, kwargs in fake.calls))
+        self.assertEqual(
+            len({str(candidate.workspace.path) for candidate in run.candidates}), 3
+        )
+        self.assertTrue(
+            all(Path(str(kwargs["cwd"])).is_dir() for _, kwargs in fake.calls)
+        )
         self.assertEqual(winner.candidate.strategy.name, "minimal-fix")
         self.assertTrue(winner.report.verified)
         self.assertEqual(winner.score.files_changed, 1)
+
+        evolution = EvolutionLab(
+            self.root / "evolution-state",
+            proof_runtime=self.proofs,
+        )
+        evidence = await evolution.attest_verification(
+            winner.report,
+            repo=self.repo,
+        )
+        lesson = await evolution.propose_memory(
+            "This repository requires the deterministic app.txt repair gate.",
+            title="Verified app repair gate",
+            category="verified_knowledge",
+            evidence=(evidence,),
+            confidence=0.9,
+            repo=self.repo,
+        )
+        self.assertEqual(lesson.status, "candidate")
+        self.assertEqual(lesson.category, "verified_knowledge")
 
         promoted = await winner.promote()
         self.assertEqual((self.repo / "app.txt").read_text(encoding="utf-8"), "fixed\n")
@@ -165,8 +207,12 @@ class ProofTreeRuntimeTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(NoVerifiedCandidate, "no verified candidate"):
             await run.best_verified()
 
-        self.assertEqual((self.repo / "app.txt").read_text(encoding="utf-8"), "broken\n")
-        self.assertTrue(all(candidate.workspace.path.exists() for candidate in run.candidates))
+        self.assertEqual(
+            (self.repo / "app.txt").read_text(encoding="utf-8"), "broken\n"
+        )
+        self.assertTrue(
+            all(candidate.workspace.path.exists() for candidate in run.candidates)
+        )
 
     async def test_recovers_run_and_reexecutes_verification(self) -> None:
         def implement(_prompt: str, cwd: Path, _index: int) -> None:
@@ -194,7 +240,9 @@ class ProofTreeRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_partial_spawn_is_durable_and_recoverable(self) -> None:
         fake = FakeRlm(
-            lambda _prompt, cwd, _index: (cwd / "app.txt").write_text("fixed\n", encoding="utf-8"),
+            lambda _prompt, cwd, _index: (cwd / "app.txt").write_text(
+                "fixed\n", encoding="utf-8"
+            ),
             fail_after=1,
         )
         runtime = ProofTreeRuntime(
@@ -211,11 +259,15 @@ class ProofTreeRuntimeTest(unittest.IsolatedAsyncioTestCase):
         recovered = await runtime.load(raised.exception.run_id, repo=self.repo)
         self.assertEqual(recovered.state, "start_error")
         self.assertEqual(len(recovered.candidates), 1)
-        self.assertEqual((await recovered.statuses())[recovered.candidates[0].id], "completed")
+        self.assertEqual(
+            (await recovered.statuses())[recovered.candidates[0].id], "completed"
+        )
 
     async def test_wait_timeout_preserves_running_candidates(self) -> None:
         fake = FakeRlm(
-            lambda _prompt, cwd, _index: (cwd / "app.txt").write_text("fixed\n", encoding="utf-8"),
+            lambda _prompt, cwd, _index: (cwd / "app.txt").write_text(
+                "fixed\n", encoding="utf-8"
+            ),
             running=True,
         )
         runtime = ProofTreeRuntime(
@@ -230,7 +282,9 @@ class ProofTreeRuntimeTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ExplorationTimeout, "still running"):
             await run.wait(timeout_seconds=0.02, poll_interval_seconds=0.005)
 
-        self.assertTrue(all(candidate.workspace.path.exists() for candidate in run.candidates))
+        self.assertTrue(
+            all(candidate.workspace.path.exists() for candidate in run.candidates)
+        )
 
 
 if __name__ == "__main__":

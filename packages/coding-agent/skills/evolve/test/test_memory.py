@@ -10,9 +10,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SKILL_ROOT.parent / "workspace" / "src"))
+sys.path.insert(0, str(SKILL_ROOT.parent / "prove" / "src"))
 sys.path.insert(0, str(SKILL_ROOT / "src"))
 
 from evolve import EvidenceError, EvidenceRef, EvolutionError, EvolutionLab
+from prove import ProofRuntime, Requirement, command
+from workspace import WorkspaceManager
 
 
 class EvolutionMemoryTest(unittest.IsolatedAsyncioTestCase):
@@ -28,9 +32,20 @@ class EvolutionMemoryTest(unittest.IsolatedAsyncioTestCase):
         self._git("add", "policy.txt")
         self._git("commit", "-m", "fixture")
         self.now = datetime(2026, 8, 10, 12, tzinfo=timezone.utc)
-        self.lab = EvolutionLab(self.root / "state", clock=lambda: self.now)
-        self.report_path = self.root / "verified-report.json"
-        self._write_report(status="verified", passed=True)
+        self.workspaces = WorkspaceManager(self.root / "workspace-state")
+        self.proof_runtime = ProofRuntime(
+            self.root / "proof-state",
+            workspace_manager=self.workspaces,
+        )
+        self.lab = EvolutionLab(
+            self.root / "state",
+            clock=lambda: self.now,
+            proof_runtime=self.proof_runtime,
+        )
+        self.report_path = self.root / "observation.json"
+        self._write_report(status="observed", passed=False)
+        self._proof_report = None
+        self._proof_counter = 0
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -64,8 +79,44 @@ class EvolutionMemoryTest(unittest.IsolatedAsyncioTestCase):
             encoding="utf-8",
         )
 
+    async def _verification_report(self, *, passes: bool = True):
+        self._proof_counter += 1
+        contract = await self.proof_runtime.contract(
+            "Prove a reusable evolution lesson",
+            requirements=(Requirement("LESSON", "the lesson passed verification"),),
+            gates=(
+                command(
+                    (
+                        sys.executable,
+                        "-c",
+                        f"raise SystemExit({0 if passes else 1})",
+                    ),
+                    id="lesson-proof",
+                    proves=("LESSON",),
+                ),
+            ),
+            repo=self.repo,
+        )
+        workspace = await self.workspaces.fork(
+            self.repo,
+            name=f"proof-{self._proof_counter}",
+        )
+        try:
+            (workspace.path / "proof-change.txt").write_text(
+                f"proof {self._proof_counter}\n",
+                encoding="utf-8",
+            )
+            return await self.proof_runtime.run(workspace, contract)
+        finally:
+            await self.workspaces.discard(workspace, repo=self.repo)
+
     async def _verified_evidence(self) -> EvidenceRef:
-        return await self.lab.attest_verification(self.report_path)
+        if self._proof_report is None:
+            self._proof_report = await self._verification_report()
+        return await self.lab.attest_verification(
+            self._proof_report,
+            repo=self.repo,
+        )
 
     async def test_proposes_attested_memory_without_activating_harness(self) -> None:
         proof = await self._verified_evidence()
@@ -124,9 +175,37 @@ class EvolutionMemoryTest(unittest.IsolatedAsyncioTestCase):
                 repo=self.repo,
             )
 
-        self._write_report(status="failed", passed=False)
-        with self.assertRaisesRegex(EvidenceError, "status must be 'verified'"):
-            await self.lab.attest_verification(self.report_path)
+        with self.assertRaisesRegex(
+            EvidenceError, "must be a VerificationReport returned by prove.run"
+        ):
+            await self.lab.attest_verification(self.report_path, repo=self.repo)
+
+        failed_report = await self._verification_report(passes=False)
+        with self.assertRaisesRegex(EvidenceError, "not 'verified'"):
+            await self.lab.attest_verification(failed_report, repo=self.repo)
+
+    async def test_activation_freshness_applies_the_active_confidence_floor(
+        self,
+    ) -> None:
+        candidate = await self.lab.propose_memory(
+            "A weakly supported memory must remain in shadow.",
+            title="Weak activation candidate",
+            category="verified_knowledge",
+            evidence=(await self._verified_evidence(),),
+            confidence=0.0,
+            repo=self.repo,
+        )
+
+        current = await self.lab.freshness(candidate)
+        prospective = await self.lab.freshness(candidate, for_activation=True)
+
+        self.assertTrue(current.fresh)
+        self.assertFalse(prospective.fresh)
+        self.assertLess(prospective.effective_confidence, 0.5)
+        self.assertIn(
+            "effective confidence is below active threshold",
+            prospective.reasons,
+        )
 
     async def test_dependency_change_invalidates_candidate(self) -> None:
         candidate = await self.lab.propose_memory(

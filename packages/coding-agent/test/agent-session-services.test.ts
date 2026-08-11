@@ -7,9 +7,14 @@ import { AGENT_MESSAGE_SKILL_NAME, type AgentSessionMessageController } from "..
 import { AGENT_OBSERVE_SKILL_NAME, type AgentObserveController } from "../src/core/agent-observe.js";
 import { createAgentSessionFromServices, createAgentSessionServices } from "../src/core/agent-session-services.js";
 import { AuthStorage } from "../src/core/auth-storage.js";
+import { normalizeRlmCapabilityManifest } from "../src/core/rlm-capabilities.js";
 import { SessionManager } from "../src/core/session-manager.js";
 import { SettingsManager } from "../src/core/settings-manager.js";
 import { createSyntheticSourceInfo } from "../src/core/source-info.js";
+
+interface InspectableSession {
+	_createKernelHostHandlers(): Record<string, unknown>;
+}
 
 describe("createAgentSessionFromServices", () => {
 	const cleanupPaths: string[] = [];
@@ -94,13 +99,34 @@ describe("createAgentSessionFromServices", () => {
 		const sessionManager = SessionManager.create(tempDir, join(tempDir, "sessions"));
 		sessionManager.newSession({ rlmDepth: 1 });
 
-		const { session } = await createAgentSessionFromServices({ services, sessionManager });
+		const { session } = await createAgentSessionFromServices({
+			services,
+			sessionManager,
+			capabilities: normalizeRlmCapabilityManifest(undefined, tempDir),
+		});
 		try {
 			expect(session.rlmDepth).toBe(1);
 			expect(existsSync(join(tempDir, "telemetry.json"))).toBe(false);
 		} finally {
 			session.dispose();
 		}
+	});
+
+	it("refuses to resume a child session without a capability attestation", async () => {
+		const tempDir = join(tmpdir(), `pi-session-child-capability-${Date.now()}`);
+		mkdirSync(tempDir, { recursive: true });
+		cleanupPaths.push(tempDir);
+		const services = await createAgentSessionServices({
+			cwd: tempDir,
+			agentDir: tempDir,
+			resourceLoaderOptions: { noPromptTemplates: true, noThemes: true },
+		});
+		const sessionManager = SessionManager.create(tempDir, join(tempDir, "sessions"));
+		sessionManager.newSession({ rlmDepth: 1 });
+
+		await expect(createAgentSessionFromServices({ services, sessionManager })).rejects.toThrow(
+			"capability manifest is missing",
+		);
 	});
 
 	it("forwards daemon-backed agent message controllers into AgentSession", async () => {
@@ -187,6 +213,47 @@ describe("createAgentSessionFromServices", () => {
 			).not.toHaveProperty("agent_message.send");
 		} finally {
 			session.dispose();
+		}
+	});
+
+	it("never exposes credential-bearing MCP handlers to constrained child kernels", async () => {
+		const tempDir = join(tmpdir(), `pi-session-child-mcp-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		mkdirSync(tempDir, { recursive: true });
+		cleanupPaths.push(tempDir);
+		const services = await createAgentSessionServices({
+			cwd: tempDir,
+			agentDir: tempDir,
+			resourceLoaderOptions: { noPromptTemplates: true, noThemes: true },
+		});
+		vi.spyOn(services.mcpManager, "hostHandlers").mockReturnValue({
+			"mcp.config": async () => ({
+				url: "https://private.example/mcp",
+				headers: { Authorization: "Bearer secret" },
+			}),
+		});
+
+		const root = (
+			await createAgentSessionFromServices({
+				services,
+				sessionManager: SessionManager.create(tempDir, join(tempDir, "root-sessions")),
+			})
+		).session;
+		const child = (
+			await createAgentSessionFromServices({
+				services,
+				sessionManager: SessionManager.create(tempDir, join(tempDir, "child-sessions")),
+				rlmDepth: 1,
+				capabilities: normalizeRlmCapabilityManifest(undefined, tempDir),
+			})
+		).session;
+		try {
+			const rootInternals = root as unknown as InspectableSession;
+			const childInternals = child as unknown as InspectableSession;
+			expect(rootInternals._createKernelHostHandlers()).toHaveProperty("mcp.config");
+			expect(childInternals._createKernelHostHandlers()).not.toHaveProperty("mcp.config");
+		} finally {
+			root.dispose();
+			child.dispose();
 		}
 	});
 

@@ -14,6 +14,7 @@ import {
 	createAgentSessionServices,
 } from "../../src/core/agent-session-runtime.js";
 import { AuthStorage } from "../../src/core/auth-storage.js";
+import { normalizeRlmCapabilityManifest } from "../../src/core/rlm-capabilities.js";
 import type { SubagentRuntimeHost } from "../../src/core/rlm-runtime.js";
 import { SessionManager } from "../../src/core/session-manager.js";
 import type {
@@ -208,7 +209,10 @@ describe("AgentSessionRuntime characterization", () => {
 		const { runtime } = await createRuntimeForTest(() => {}, {
 			cwd: tempDir,
 			sessionManager,
-			sessionOptions: { rlmDepth: 2 },
+			sessionOptions: {
+				rlmDepth: 2,
+				capabilities: normalizeRlmCapabilityManifest(undefined, tempDir),
+			},
 		});
 
 		await runtime.newSession({ parentSession });
@@ -228,7 +232,10 @@ describe("AgentSessionRuntime characterization", () => {
 			const { runtime } = await createRuntimeForTest(() => {}, {
 				cwd: tempDir,
 				sessionManager,
-				sessionOptions: { rlmDepth: 2 },
+				sessionOptions: {
+					rlmDepth: 2,
+					capabilities: normalizeRlmCapabilityManifest(undefined, tempDir),
+				},
 			});
 
 			await runtime.fork(firstEntry);
@@ -339,6 +346,7 @@ describe("AgentSessionRuntime characterization", () => {
 			parentSession,
 			prompt: "run in process",
 			cwd: tempDir,
+			capabilities: normalizeRlmCapabilityManifest(undefined, tempDir),
 			model: faux.getModel(),
 			thinkingLevel: "off" as const,
 			serviceTier: null,
@@ -401,6 +409,7 @@ describe("AgentSessionRuntime characterization", () => {
 			sessionName: "child-worker",
 			sessionDir: join(runtime.cwd, "parent-agent-child"),
 			cwd: runtime.cwd,
+			capabilities: normalizeRlmCapabilityManifest(undefined, runtime.cwd),
 			model: runtime.session.model!,
 			thinkingLevel: "off",
 			serviceTier: null,

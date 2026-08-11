@@ -14,6 +14,8 @@ import {
 	KernelBusyAfterInterruptError,
 	type KernelDiffDisplay,
 	KernelManager,
+	type KernelProcessWrapper,
+	type KernelResourceLimits,
 	type KernelSentAgentMessage,
 } from "../kernel/index.js";
 import { manifestPathIn, type RestoreResult, snapshotPathIn } from "../kernel/state-snapshot.js";
@@ -271,6 +273,16 @@ export interface IpythonToolOptions {
 	/** Python override. Must have `ipykernel` installed. */
 	python?: string;
 	env?: Record<string, string>;
+	/** When false, the kernel receives only `env`, never the ambient host environment. */
+	inheritEnv?: boolean;
+	/** Jupyter channel transport. Defaults to TCP. */
+	transport?: "tcp" | "ipc";
+	/** Parent directory for private Jupyter connection files. */
+	runtimeDir?: string;
+	/** Per-kernel argv-preserving process launch rewrite. */
+	processWrapper?: KernelProcessWrapper;
+	/** Host-enforced limits for the kernel and all descendants. */
+	resourceLimits?: KernelResourceLimits;
 	/** Command prefix prepended to every %%bash cell. */
 	commandPrefix?: string;
 	/** Optional explicit shell path for bare %%bash cells. */
@@ -479,6 +491,11 @@ export class IpythonKernelProvisioner {
 				python: this.options?.python,
 				cwd: this.cwd,
 				env: this.options?.env,
+				inheritEnv: this.options?.inheritEnv,
+				transport: this.options?.transport,
+				runtimeDir: this.options?.runtimeDir,
+				processWrapper: this.options?.processWrapper,
+				resourceLimits: this.options?.resourceLimits,
 				sessionId: this.options?.sessionId,
 				hostHandlers: this.options?.hostHandlers,
 				pythonSkills: this.options?.pythonSkills,

@@ -6,8 +6,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-
 rlm_module = importlib.import_module("rlm")
+DEFAULT_CAPABILITIES = {
+    "filesystem": {"read": ["/tmp/worktree"], "write": ["/tmp/worktree"]},
+    "network": {"allow": [], "deny_by_default": True},
+    "secrets": {"allow": []},
+    "process": {"wall_time_ms": 1_200_000, "max_processes": 64},
+}
 
 
 class RlmSubagentRegistryTest(unittest.TestCase):
@@ -22,6 +27,7 @@ class RlmSubagentRegistryTest(unittest.TestCase):
                         "session_name": "subagent-check-api-a1b2c3d4",
                         "session_dir": "/tmp/parent/sub-a1b2c3d4",
                         "status": "completed",
+                        "usage_tokens": 123,
                     }
                 ]
             }
@@ -37,8 +43,8 @@ class RlmSubagentRegistryTest(unittest.TestCase):
         self.assertEqual(subagents[0].session_name, "subagent-check-api-a1b2c3d4")
         self.assertEqual(subagents[0].session_dir, Path("/tmp/parent/sub-a1b2c3d4"))
         self.assertEqual(subagents[0].status, "completed")
+        self.assertEqual(subagents[0].usage_tokens, 123)
         host_request.assert_awaited_once_with("rlm.list_subagents")
-
 
     def test_lists_failed_subagents_from_host(self) -> None:
         host_request = AsyncMock(
@@ -70,6 +76,7 @@ class RlmSubagentRegistryTest(unittest.TestCase):
                 "model": "deepseek/deepseek-v4-flash",
                 "cwd": "/tmp/worktree",
                 "effort": "high",
+                "capabilities": DEFAULT_CAPABILITIES,
             }
         )
 
@@ -101,6 +108,10 @@ class RlmSubagentRegistryTest(unittest.TestCase):
         self.assertEqual(result.model, "deepseek/deepseek-v4-flash")
         self.assertEqual(result.cwd, Path("/tmp/worktree"))
         self.assertEqual(result.effort, "high")
+        self.assertEqual(result.capabilities.filesystem.read, (Path("/tmp/worktree"),))
+        self.assertTrue(result.capabilities.network.deny_by_default)
+        self.assertEqual(result.capabilities.secrets.allow, ())
+        self.assertEqual(result.capabilities.process.max_processes, 64)
 
     def test_resolves_semantic_route_before_calling_host(self) -> None:
         async def resolver(route, prompt, kwargs):
@@ -120,6 +131,7 @@ class RlmSubagentRegistryTest(unittest.TestCase):
                 "model": "anthropic/claude-opus-4-7",
                 "cwd": "/tmp/worktree",
                 "effort": "xhigh",
+                "capabilities": DEFAULT_CAPABILITIES,
             }
         )
         rlm_module.register_model_route_resolver(resolver)
@@ -151,6 +163,27 @@ class RlmSubagentRegistryTest(unittest.TestCase):
         )
         self.assertEqual(result.model, "anthropic/claude-opus-4-7")
         self.assertEqual(result.effort, "xhigh")
+
+    def test_rejects_a_malformed_capability_handle(self) -> None:
+        host_request = AsyncMock(
+            return_value={
+                "rlm_child_id": "sub-invalid",
+                "name": "invalid",
+                "session_dir": "/tmp/parent/sub-invalid",
+                "model": "anthropic/claude-opus-4-7",
+                "cwd": "/tmp/worktree",
+                "effort": "high",
+                "capabilities": {
+                    **DEFAULT_CAPABILITIES,
+                    "secrets": {"allow": ["API_KEY=value"]},
+                },
+            }
+        )
+        with (
+            patch.object(rlm_module, "host_request", host_request),
+            self.assertRaisesRegex(RuntimeError, "secret capabilities"),
+        ):
+            asyncio.run(rlm_module.rlm("reject malformed capabilities"))
 
     def test_finds_authenticated_models_through_host(self) -> None:
         host_request = AsyncMock(
@@ -259,7 +292,9 @@ class RlmSubagentRegistryTest(unittest.TestCase):
         host_request = AsyncMock(return_value={"subagent": {"status": "completed"}})
 
         with patch.object(rlm_module, "host_request", host_request):
-            with self.assertRaisesRegex(RuntimeError, "rlm.delete_subagent entry is missing rlm_child_id"):
+            with self.assertRaisesRegex(
+                RuntimeError, "rlm.delete_subagent entry is missing rlm_child_id"
+            ):
                 asyncio.run(rlm_module.delete_subagent("api-reviewer"))
 
         with self.assertRaisesRegex(ValueError, "target must not be empty"):
@@ -292,6 +327,28 @@ class RlmSubagentRegistryTest(unittest.TestCase):
         with patch.object(rlm_module, "host_request", host_request):
             with self.assertRaisesRegex(RuntimeError, "missing session_name"):
                 asyncio.run(rlm_module.list_subagents())
+
+    def test_rejects_invalid_subagent_usage(self) -> None:
+        host_request = AsyncMock(
+            return_value={
+                "subagents": [
+                    {
+                        "rlm_child_id": "sub-invalid-usage",
+                        "active_session_id": None,
+                        "session_id": "session-invalid-usage",
+                        "session_name": "invalid-usage",
+                        "session_dir": "/tmp/parent/sub-invalid-usage",
+                        "status": "completed",
+                        "usage_tokens": True,
+                    }
+                ]
+            }
+        )
+        with (
+            patch.object(rlm_module, "host_request", host_request),
+            self.assertRaisesRegex(RuntimeError, "invalid usage_tokens"),
+        ):
+            asyncio.run(rlm_module.list_subagents())
 
 
 if __name__ == "__main__":

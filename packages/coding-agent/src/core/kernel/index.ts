@@ -1,9 +1,9 @@
 // TODO: reconsider persistent kernel vs stateless `python -c` once RLM-1 weights land.
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { createHmac, randomBytes } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { availableParallelism, tmpdir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { registerSessionResourceCleanup } from "@earendil-works/pi-ai";
 import { v4 as uuid } from "uuid";
@@ -76,11 +76,42 @@ export interface KernelSnapshotConfig {
 	debounceMs?: number;
 }
 
+/** A direct kernel process invocation before or after a per-kernel wrapper is applied. */
+export interface KernelProcessLaunchDescriptor {
+	command: string;
+	args: string[];
+}
+
+/** Rewrites one kernel launch without flattening its argument vector through a shell. */
+export type KernelProcessWrapper = (launch: KernelProcessLaunchDescriptor) => KernelProcessLaunchDescriptor;
+
+/** Host-enforced limits for a kernel process group and all of its descendants. */
+export interface KernelResourceLimits {
+	/** Number of logical CPUs available to the process group. Linux only. */
+	cpu?: number;
+	/** Maximum aggregate resident set size of the process group. */
+	memoryBytes?: number;
+	/** Maximum elapsed lifetime, measured from spawn. */
+	wallTimeMs?: number;
+	/** Maximum number of processes, including the process-group leader. */
+	maxProcesses?: number;
+}
+
 export interface KernelManagerOptions {
 	/** Python interpreter that has `ipykernel` available. Defaults to the auto-bootstrapped kernel. */
 	python?: string;
 	cwd?: string;
 	env?: Record<string, string>;
+	/** When false, use only `env` rather than merging the host environment. Default true. */
+	inheritEnv?: boolean;
+	/** Jupyter channel transport. Defaults to TCP. */
+	transport?: "tcp" | "ipc";
+	/** Parent directory for private Jupyter connection files. Defaults to the OS temp directory. */
+	runtimeDir?: string;
+	/** Per-process argv-preserving launch rewrite (for example, the SRT CLI). */
+	processWrapper?: KernelProcessWrapper;
+	/** Host-enforced process-group resource limits. */
+	resourceLimits?: KernelResourceLimits;
 	sessionId?: string;
 	hostHandlers?: HostRequestHandlers;
 	pythonSkills?: readonly KernelPythonSkill[];
@@ -275,7 +306,7 @@ function raceStartupWithAbort<T>(promise: Promise<T>, signal: AbortSignal | unde
 
 interface ConnectionInfo {
 	ip: string;
-	transport: "tcp";
+	transport: "tcp" | "ipc";
 	shell_port: number;
 	iopub_port: number;
 	stdin_port: number;
@@ -409,10 +440,16 @@ function hasResolvedPorts(info: ConnectionInfo): boolean {
 	return CONNECTION_PORT_KEYS.every((key) => Number.isInteger(info[key]) && info[key] > 0);
 }
 
-function parseConnectionInfo(value: unknown): ConnectionInfo | null {
+function parseConnectionInfo(value: unknown, connectionPath: string): ConnectionInfo | null {
 	if (!isRecord(value)) return null;
-	if (value.ip !== "127.0.0.1") return null;
-	if (value.transport !== "tcp") return null;
+	if (value.transport !== "tcp" && value.transport !== "ipc") return null;
+	if (value.transport === "tcp") {
+		if (value.ip !== "127.0.0.1") return null;
+	} else {
+		if (typeof value.ip !== "string" || !isAbsolute(value.ip)) return null;
+		const socketRelative = relative(dirname(connectionPath), value.ip);
+		if (socketRelative === "" || socketRelative.startsWith("..") || isAbsolute(socketRelative)) return null;
+	}
 	if (value.signature_scheme !== "hmac-sha256") return null;
 	if (typeof value.key !== "string") return null;
 	const shellPort = value.shell_port;
@@ -420,20 +457,18 @@ function parseConnectionInfo(value: unknown): ConnectionInfo | null {
 	const stdinPort = value.stdin_port;
 	const controlPort = value.control_port;
 	const hbPort = value.hb_port;
-	if (typeof shellPort !== "number" || !Number.isInteger(shellPort)) return null;
-	if (typeof iopubPort !== "number" || !Number.isInteger(iopubPort)) return null;
-	if (typeof stdinPort !== "number" || !Number.isInteger(stdinPort)) return null;
-	if (typeof controlPort !== "number" || !Number.isInteger(controlPort)) return null;
-	if (typeof hbPort !== "number" || !Number.isInteger(hbPort)) return null;
+	const ports = [shellPort, iopubPort, stdinPort, controlPort, hbPort];
+	if (ports.some((port) => typeof port !== "number" || !Number.isInteger(port))) return null;
+	if (value.transport === "ipc" && new Set(ports).size !== ports.length) return null;
 	const kernelName = typeof value.kernel_name === "string" ? value.kernel_name : "python3";
 	return {
 		ip: value.ip,
 		transport: value.transport,
-		shell_port: shellPort,
-		iopub_port: iopubPort,
-		stdin_port: stdinPort,
-		control_port: controlPort,
-		hb_port: hbPort,
+		shell_port: shellPort as number,
+		iopub_port: iopubPort as number,
+		stdin_port: stdinPort as number,
+		control_port: controlPort as number,
+		hb_port: hbPort as number,
 		signature_scheme: value.signature_scheme,
 		key: value.key,
 		kernel_name: kernelName,
@@ -442,29 +477,133 @@ function parseConnectionInfo(value: unknown): ConnectionInfo | null {
 
 function readConnectionInfo(path: string): ConnectionInfo | null {
 	try {
-		return parseConnectionInfo(JSON.parse(readFileSync(path, "utf8")));
+		return parseConnectionInfo(JSON.parse(readFileSync(path, "utf8")), path);
 	} catch {
 		return null;
 	}
 }
 
-function makeConnection(): { info: ConnectionInfo; path: string; tempDir: string } {
+function makeConnection(
+	transport: "tcp" | "ipc" = "tcp",
+	runtimeDir?: string,
+): { info: ConnectionInfo; path: string; tempDir: string } {
+	const tempDir = mkdtempSync(join(resolve(runtimeDir ?? tmpdir()), "prime-agent-kernel-"));
+	const ipc = transport === "ipc";
 	const info: ConnectionInfo = {
-		ip: "127.0.0.1",
-		transport: "tcp",
-		shell_port: 0,
-		iopub_port: 0,
-		stdin_port: 0,
-		control_port: 0,
-		hb_port: 0,
+		ip: ipc ? join(tempDir, "kernel") : "127.0.0.1",
+		transport,
+		shell_port: ipc ? 1 : 0,
+		iopub_port: ipc ? 2 : 0,
+		stdin_port: ipc ? 3 : 0,
+		control_port: ipc ? 4 : 0,
+		hb_port: ipc ? 5 : 0,
 		signature_scheme: "hmac-sha256",
 		key: randomBytes(16).toString("hex"),
 		kernel_name: "python3",
 	};
-	const tempDir = mkdtempSync(join(tmpdir(), "prime-agent-kernel-"));
 	const path = join(tempDir, "connection.json");
 	writeFileSync(path, JSON.stringify(info, null, 2), { mode: 0o600 });
 	return { info, path, tempDir };
+}
+
+function channelEndpoint(connection: ConnectionInfo, port: number): string {
+	return connection.transport === "ipc" ? `ipc://${connection.ip}-${port}` : `tcp://${connection.ip}:${port}`;
+}
+
+function parseCpuList(value: string): number[] {
+	const ids: number[] = [];
+	for (const part of value.trim().split(",")) {
+		const range = /^(\d+)(?:-(\d+))?$/.exec(part.trim());
+		if (!range) throw new Error(`Invalid Linux CPU affinity list: ${value}`);
+		const first = Number(range[1]);
+		const last = range[2] === undefined ? first : Number(range[2]);
+		if (last < first) throw new Error(`Invalid Linux CPU affinity range: ${part}`);
+		for (let id = first; id <= last; id++) ids.push(id);
+	}
+	return ids;
+}
+
+function availableCpuIds(): number[] {
+	try {
+		const status = readFileSync("/proc/self/status", "utf8");
+		const match = /^Cpus_allowed_list:\s*(.+)$/m.exec(status);
+		if (match) return parseCpuList(match[1]!);
+	} catch {
+		// Fall through to the process-wide count when procfs is unavailable.
+	}
+	return Array.from({ length: availableParallelism() }, (_, index) => index);
+}
+
+function linuxProcessTree(rootPid: number): { processCount: number; rssBytes: number } {
+	const pending = [rootPid];
+	const visited = new Set<number>();
+	let rssPages = 0;
+	while (pending.length > 0) {
+		const pid = pending.pop()!;
+		if (visited.has(pid)) continue;
+		visited.add(pid);
+		try {
+			const statm = readFileSync(`/proc/${pid}/statm`, "utf8").trim().split(/\s+/);
+			const resident = Number(statm[1]);
+			if (!Number.isFinite(resident)) throw new Error(`Invalid resident set data for pid ${pid}`);
+			rssPages += resident;
+		} catch (error) {
+			if (pid === rootPid) throw error;
+			continue;
+		}
+		try {
+			for (const task of readdirSync(`/proc/${pid}/task`)) {
+				let children: string;
+				try {
+					children = readFileSync(`/proc/${pid}/task/${task}/children`, "utf8");
+				} catch {
+					continue;
+				}
+				for (const child of children.trim().split(/\s+/)) {
+					if (child) pending.push(Number(child));
+				}
+			}
+		} catch {
+			// A short-lived descendant exited after its stat was collected.
+		}
+	}
+	return { processCount: visited.size, rssBytes: rssPages * 4096 };
+}
+
+function macosProcessTree(rootPid: number): { processCount: number; rssBytes: number } {
+	const result = spawnSync("ps", ["-axo", "pid=,ppid=,rss="], {
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	if (result.error || result.status !== 0) {
+		throw new Error(`Unable to inspect macOS process tree: ${result.error?.message ?? result.stderr.trim()}`);
+	}
+	const rssByPid = new Map<number, number>();
+	const children = new Map<number, number[]>();
+	for (const line of result.stdout.split(/\r?\n/)) {
+		const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/.exec(line);
+		if (!match) continue;
+		const pid = Number(match[1]);
+		const parentPid = Number(match[2]);
+		rssByPid.set(pid, Number(match[3]) * 1024);
+		const siblings = children.get(parentPid);
+		if (siblings) siblings.push(pid);
+		else children.set(parentPid, [pid]);
+	}
+	if (!rssByPid.has(rootPid)) throw new Error(`Kernel root process ${rootPid} is absent from macOS ps output`);
+	const pending = [rootPid];
+	const visited = new Set<number>();
+	let rssBytes = 0;
+	while (pending.length > 0) {
+		const pid = pending.pop()!;
+		if (visited.has(pid)) continue;
+		visited.add(pid);
+		const processRssBytes = rssByPid.get(pid);
+		if (processRssBytes === undefined) continue;
+		rssBytes += processRssBytes;
+		pending.push(...(children.get(pid) ?? []));
+	}
+	return { processCount: visited.size, rssBytes };
 }
 
 // ---- process-wide cleanup -----------------------------------------------
@@ -511,7 +650,18 @@ function installSignalHandlersOnce(): void {
 export class KernelManager {
 	private readonly options: Pick<
 		KernelManagerOptions,
-		"python" | "cwd" | "env" | "sessionId" | "hostHandlers" | "pythonSkills" | "snapshot"
+		| "python"
+		| "cwd"
+		| "env"
+		| "inheritEnv"
+		| "runtimeDir"
+		| "transport"
+		| "processWrapper"
+		| "resourceLimits"
+		| "sessionId"
+		| "hostHandlers"
+		| "pythonSkills"
+		| "snapshot"
 	> &
 		Required<Pick<KernelManagerOptions, "username">>;
 	private readonly session = uuid();
@@ -523,6 +673,8 @@ export class KernelManager {
 	private kernelPid?: number;
 	/** Polls a forked kernel's pid for death (no "exit" event on a non-child). */
 	private forkedLivenessTimer?: ReturnType<typeof globalThis.setInterval>;
+	private resourceMonitorTimer?: ReturnType<typeof globalThis.setInterval>;
+	private processGroupLeader = false;
 	private shell?: Dealer;
 	private iopub?: Subscriber;
 	private control?: Dealer;
@@ -551,6 +703,11 @@ export class KernelManager {
 			python: options.python,
 			cwd: options.cwd,
 			env: options.env,
+			inheritEnv: options.inheritEnv,
+			runtimeDir: options.runtimeDir,
+			transport: options.transport,
+			processWrapper: options.processWrapper,
+			resourceLimits: options.resourceLimits,
 			sessionId: options.sessionId,
 			hostHandlers: options.hostHandlers,
 			pythonSkills: options.pythonSkills,
@@ -607,14 +764,14 @@ export class KernelManager {
 			throw new Error("Kernel was disposed during startup");
 		}
 
-		let connection = makeConnection();
+		let connection = makeConnection(this.options.transport, this.options.runtimeDir);
 		this.tempDir = connection.tempDir;
 
 		// Fast path: fork a pre-imported kernel from the forkserver. Any failure
 		// (disabled, unavailable, fork error) degrades to the direct-spawn path so
 		// correctness never depends on fork.
 		let forked = false;
-		if (isForkServerEnabled()) {
+		if (!this.options.processWrapper && !this.options.resourceLimits && isForkServerEnabled()) {
 			try {
 				this.kernelPid = await forkKernel(python, {
 					connectionPath: connection.path,
@@ -638,16 +795,41 @@ export class KernelManager {
 				} catch {
 					// Leave the temp dir for OS tmp cleanup.
 				}
-				connection = makeConnection();
+				connection = makeConnection(this.options.transport, this.options.runtimeDir);
 				this.tempDir = connection.tempDir;
 			}
 		}
 
 		if (!forked) {
-			const kernel = spawn(python, ["-m", "ipykernel_launcher", "-f", connection.path], {
+			const baseLaunch: KernelProcessLaunchDescriptor = {
+				command: python,
+				args: ["-m", "ipykernel_launcher", "-f", connection.path],
+			};
+			let launch: KernelProcessLaunchDescriptor;
+			try {
+				launch = this.options.processWrapper ? this.options.processWrapper(baseLaunch) : baseLaunch;
+				if (!launch.command || !Array.isArray(launch.args) || launch.args.some((arg) => typeof arg !== "string")) {
+					throw new Error("Kernel process wrapper returned an invalid launch descriptor");
+				}
+			} catch (error) {
+				this.state = "shutdown";
+				liveKernels.delete(this);
+				this.cleanupResources("SIGKILL");
+				throw error;
+			}
+			const monitored = this.options.processWrapper !== undefined || this.options.resourceLimits !== undefined;
+			this.processGroupLeader = monitored && process.platform !== "win32";
+			const childEnv =
+				this.options.inheritEnv === false
+					? (this.options.env ?? {})
+					: this.options.env
+						? { ...process.env, ...this.options.env }
+						: process.env;
+			const kernel = spawn(launch.command, launch.args, {
 				cwd: this.options.cwd,
-				env: this.options.env ? { ...process.env, ...this.options.env } : process.env,
+				env: childEnv,
 				stdio: ["ignore", "pipe", "pipe"],
+				...(this.processGroupLeader ? { detached: true } : {}),
 			});
 			this.kernel = kernel;
 
@@ -673,6 +855,16 @@ export class KernelManager {
 				liveKernels.delete(this);
 				this.cleanupResources();
 			});
+			try {
+				this.applyCpuAffinity(kernel);
+				this.startResourceMonitor(kernel);
+			} catch (error) {
+				this.appendKernelDiagnostic(`resource policy setup failed: ${errorMessage(error)}`);
+				this.state = "shutdown";
+				liveKernels.delete(this);
+				this.cleanupResources("SIGKILL");
+				throw error;
+			}
 		}
 
 		const connectionPath = connection.path;
@@ -690,9 +882,12 @@ export class KernelManager {
 		this.shell = new Dealer();
 		this.iopub = new Subscriber();
 		this.control = new Dealer();
-		this.shell.connect(`${conn.transport}://${conn.ip}:${conn.shell_port}`);
-		this.iopub.connect(`${conn.transport}://${conn.ip}:${conn.iopub_port}`);
-		this.control.connect(`${conn.transport}://${conn.ip}:${conn.control_port}`);
+		this.shell.linger = 0;
+		this.iopub.linger = 0;
+		this.control.linger = 0;
+		this.shell.connect(channelEndpoint(conn, conn.shell_port));
+		this.iopub.connect(channelEndpoint(conn, conn.iopub_port));
+		this.control.connect(channelEndpoint(conn, conn.control_port));
 		this.iopub.subscribe("");
 
 		// ZMQ PUB/SUB slow-joiner: give the subscription a brief chance to reach the kernel before first execute.
@@ -710,6 +905,83 @@ export class KernelManager {
 
 		this.state = "running";
 		this.startForkedLivenessMonitor();
+	}
+
+	private applyCpuAffinity(kernel: ChildProcess): void {
+		const cpu = this.options.resourceLimits?.cpu;
+		if (cpu === undefined) return;
+		if (process.platform !== "linux") {
+			throw new Error("Kernel CPU affinity is supported only on Linux");
+		}
+		if (!Number.isSafeInteger(cpu) || cpu <= 0) throw new Error("Kernel CPU limit must be a positive integer");
+		if (kernel.pid === undefined) throw new Error("Kernel process has no pid for CPU affinity");
+		const ids = availableCpuIds();
+		if (cpu > ids.length) {
+			throw new Error(`Kernel requested ${cpu} CPUs but only ${ids.length} are available`);
+		}
+		const affinity = ids.slice(0, cpu).join(",");
+		const result = spawnSync("taskset", ["-pc", affinity, String(kernel.pid)], {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		if (result.error || result.status !== 0) {
+			throw new Error(
+				`Failed to apply kernel CPU affinity ${affinity}: ${result.error?.message ?? result.stderr.trim()}`,
+			);
+		}
+	}
+
+	private startResourceMonitor(kernel: ChildProcess): void {
+		const limits = this.options.resourceLimits;
+		if (!limits) return;
+		if (
+			(limits.memoryBytes !== undefined || limits.maxProcesses !== undefined) &&
+			process.platform !== "linux" &&
+			process.platform !== "darwin"
+		) {
+			throw new Error("Kernel memory and process-count monitoring requires Linux or macOS");
+		}
+		if (limits.wallTimeMs === undefined && limits.memoryBytes === undefined && limits.maxProcesses === undefined) {
+			return;
+		}
+		if (kernel.pid === undefined) throw new Error("Kernel process has no pid for resource monitoring");
+		const rootPid = kernel.pid;
+		const startedAt = Date.now();
+		const breach = (message: string): void => {
+			if (this.state === "shutdown") return;
+			this.appendKernelDiagnostic(`resource limit exceeded: ${message}`);
+			this.state = "shutdown";
+			liveKernels.delete(this);
+			this.cleanupResources("SIGKILL");
+		};
+		this.resourceMonitorTimer = globalThis.setInterval(() => {
+			if (this.state === "shutdown") return;
+			if (limits.wallTimeMs !== undefined && Date.now() - startedAt > limits.wallTimeMs) {
+				breach(`wall time > ${limits.wallTimeMs}ms`);
+				return;
+			}
+			if (process.platform !== "linux" && process.platform !== "darwin") return;
+			let usage: { processCount: number; rssBytes: number };
+			try {
+				usage = process.platform === "linux" ? linuxProcessTree(rootPid) : macosProcessTree(rootPid);
+			} catch (error) {
+				try {
+					process.kill(rootPid, 0);
+				} catch {
+					return;
+				}
+				breach(`unable to attest descendant usage: ${errorMessage(error)}`);
+				return;
+			}
+			if (limits.memoryBytes !== undefined && usage.rssBytes > limits.memoryBytes) {
+				breach(`descendant RSS ${usage.rssBytes} bytes > ${limits.memoryBytes} bytes`);
+				return;
+			}
+			if (limits.maxProcesses !== undefined && usage.processCount > limits.maxProcesses) {
+				breach(`descendant process count ${usage.processCount} > ${limits.maxProcesses}`);
+			}
+		}, 250);
+		this.resourceMonitorTimer.unref?.();
 	}
 
 	// A forked kernel isn't a direct child, so no "exit" fires when it dies. Poll its
@@ -1292,17 +1564,33 @@ export class KernelManager {
 			globalThis.clearInterval(this.forkedLivenessTimer);
 			this.forkedLivenessTimer = undefined;
 		}
+		if (this.resourceMonitorTimer) {
+			globalThis.clearInterval(this.resourceMonitorTimer);
+			this.resourceMonitorTimer = undefined;
+		}
 		this.rejectActiveExecution(new Error("Kernel has been shut down"));
-		this.shell?.close();
-		this.iopub?.close();
-		this.control?.close();
+		for (const socket of [this.shell, this.iopub, this.control]) {
+			try {
+				socket?.close();
+			} catch (error) {
+				this.appendKernelDiagnostic(`socket cleanup failed: ${errorMessage(error)}`);
+			}
+		}
 		this.shell = undefined;
 		this.iopub = undefined;
 		this.control = undefined;
 		this.iopubPumpPromise = undefined;
 		try {
 			if (this.kernel) {
-				this.kernel.kill(killSignal);
+				if (this.processGroupLeader && this.kernel.pid !== undefined) {
+					try {
+						process.kill(-this.kernel.pid, killSignal);
+					} catch {
+						this.kernel.kill(killSignal);
+					}
+				} else {
+					this.kernel.kill(killSignal);
+				}
 			} else if (this.kernelPid !== undefined && !this.forkedKernelDied()) {
 				// Only signal a forked kernel confirmed still alive: a dead pid may have
 				// been recycled by the OS, and a kill would then hit an unrelated process.
@@ -1313,6 +1601,7 @@ export class KernelManager {
 		}
 		this.kernel = undefined;
 		this.kernelPid = undefined;
+		this.processGroupLeader = false;
 		this.connection = undefined;
 		if (this.tempDir) {
 			try {
@@ -1464,7 +1753,7 @@ export class KernelManager {
 	private scheduleSnapshot(): void {
 		const cfg = this.options.snapshot;
 		if (!cfg) return;
-		if (this.snapshotTimer) clearTimeout(this.snapshotTimer);
+		clearTimeout(this.snapshotTimer);
 		this.snapshotTimer = globalThis.setTimeout(() => {
 			this.snapshotTimer = undefined;
 			void this.snapshotState();

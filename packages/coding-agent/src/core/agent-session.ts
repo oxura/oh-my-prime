@@ -215,6 +215,12 @@ import {
 import { resolveConfigValue } from "./resolve-config-value.js";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.js";
 import {
+	createCapabilityKernelOptions,
+	normalizeRlmCapabilityManifest,
+	persistRlmCapabilityManifest,
+	type RlmCapabilityManifest,
+} from "./rlm-capabilities.js";
+import {
 	type CreateRlmSubagentRuntimeOptions,
 	createDefaultRlmSubagentSessionName,
 	createRlmDeleteSubagentHostHandler,
@@ -467,6 +473,8 @@ export interface AgentSessionConfig {
 	rlmMaxDepth?: number;
 	/** Directory exposed to the kernel as RLM_SESSION_DIR. */
 	rlmSessionDir?: string;
+	/** Canonical capability boundary for this RLM child. Omitted for top-level sessions. */
+	capabilities?: RlmCapabilityManifest;
 	/** Node id for this session when it is itself an RLM child. */
 	rlmParentNodeId?: string;
 	/** Parent agent name/id shown in child communication doctrine. */
@@ -944,6 +952,8 @@ interface RlmChildRun {
 	session?: AgentSession;
 	/** True once the detached run task has finished its catch and cleanup paths. */
 	settled: boolean;
+	/** Cumulative provider-reported tokens for successful assistant turns. */
+	usageTokens: number;
 	/** Selector snapshot for a delete admitted while runtime startup was still pending. */
 	detachedDeletion?: RlmSubagentRegistryEntry;
 	/** Re-emits the run's rlm_child_update snapshot with its current status. */
@@ -1208,6 +1218,7 @@ export class AgentSession {
 	private _rlmMaxDepth: number;
 	private _rlmMaxDepthSource: RlmMaxDepthSource;
 	private _rlmSessionDir?: string;
+	private readonly _rlmCapabilities?: RlmCapabilityManifest;
 	private _rlmParentNodeId?: string;
 	private _rlmParentAgent?: string;
 	private _repliedToParentSinceTask: boolean | undefined;
@@ -1218,6 +1229,7 @@ export class AgentSession {
 	// Inline mode keeps finished child sessions so the inspector can still read them;
 	// the daemon does the same by leaving the child session resident in its registry.
 	private _rlmChildSessions = new Map<string, AgentSession>();
+	private _rlmChildUsageTokens = new Map<string, number>();
 	private _deletedRlmChildIds = new Set<string>();
 	// Failed explicit deletes stay hidden from listings but retain their original
 	// selector so a later delete can retry cleanup without orphaning the runtime.
@@ -1293,11 +1305,18 @@ export class AgentSession {
 		this._resourceLoader = config.resourceLoader;
 		this._customTools = config.customTools ?? [];
 		this._cwd = config.cwd;
+		this._rlmCapabilities = config.capabilities
+			? normalizeRlmCapabilityManifest(config.capabilities, this._cwd)
+			: undefined;
 		this._agentDir = config.agentDir;
 		this._modelRegistry = config.modelRegistry;
 		this._extensionRunnerRef = config.extensionRunnerRef;
-		this._initialActiveToolNames = config.initialActiveToolNames;
-		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
+		this._initialActiveToolNames = this._rlmCapabilities ? ["ipython"] : config.initialActiveToolNames;
+		this._allowedToolNames = this._rlmCapabilities
+			? new Set(["ipython"])
+			: config.allowedToolNames
+				? new Set(config.allowedToolNames)
+				: undefined;
 		this._includeGoals = config.includeGoals ?? true;
 		this._includeCompactSkill = config.includeCompactSkill ?? this.settingsManager.getCompactionAgentCallable();
 		this._rlmHeartbeatController = config.rlmHeartbeatController;
@@ -4191,6 +4210,11 @@ export class AgentSession {
 	/** Current absolute RLM spawn-depth cap. */
 	get rlmMaxDepth(): number {
 		return this._rlmMaxDepth;
+	}
+
+	/** Immutable capability manifest enforced for this RLM child. */
+	get capabilities(): RlmCapabilityManifest | undefined {
+		return this._rlmCapabilities;
 	}
 
 	/** Current session display name, if set */
@@ -8577,8 +8601,30 @@ export class AgentSession {
 			// build (a genuine resume). A later rebuild (/reload) restores state silently
 			// for continuity — the conversation is unchanged, so there's nothing to flag.
 			const notifyRestore = !this._ipythonRuntimeBuilt;
+			const capabilityArtifactDir = this._rlmCapabilities
+				? (this._ensureRlmSessionDir() ?? this._createEphemeralRlmSessionDir())
+				: undefined;
+			const rlmEnv = this._rlmKernelEnv();
+			const baseEnv: Record<string, string> = {};
+			if (this._rlmCapabilities) {
+				for (const [name, value] of Object.entries(process.env)) {
+					if (value !== undefined) baseEnv[name] = value;
+				}
+			}
+			Object.assign(baseEnv, rlmEnv);
+			const capabilityKernelOptions =
+				this._rlmCapabilities && capabilityArtifactDir
+					? createCapabilityKernelOptions({
+							manifest: this._rlmCapabilities,
+							cwd: this._cwd,
+							artifactDir: capabilityArtifactDir,
+							baseEnv,
+							pythonSkills,
+						})
+					: undefined;
 			this._ipythonKernelProvisioner = new IpythonKernelProvisioner(this._cwd, {
-				env: this._rlmKernelEnv(),
+				env: baseEnv,
+				...capabilityKernelOptions,
 				sessionId: this.sessionId,
 				hostHandlers: this._createKernelHostHandlers(),
 				pythonSkills,
@@ -8778,7 +8824,7 @@ export class AgentSession {
 				}),
 			);
 		}
-		if (this._mcpManager) {
+		if (this._mcpManager && !this._rlmCapabilities) {
 			Object.assign(handlers, this._mcpManager.hostHandlers());
 		}
 		return handlers;
@@ -8935,6 +8981,7 @@ export class AgentSession {
 		spawnCode?: string;
 		sessionDir: string;
 		cwd: string;
+		capabilities: RlmCapabilityManifest;
 		model: Model<any>;
 		thinkingLevel: ThinkingLevel;
 	}): CreateRlmSubagentRuntimeOptions {
@@ -8946,6 +8993,7 @@ export class AgentSession {
 			spawnCode: options.spawnCode,
 			sessionDir: options.sessionDir,
 			cwd: options.cwd,
+			capabilities: options.capabilities,
 			model: options.model,
 			thinkingLevel: options.thinkingLevel,
 			serviceTier:
@@ -9022,6 +9070,7 @@ export class AgentSession {
 			rlmDepth: options.rlmDepth,
 			rlmMaxDepth: options.rlmMaxDepth,
 			rlmSessionDir: options.sessionDir,
+			capabilities: options.capabilities,
 			rlmParentNodeId: options.rlmParentNodeId,
 			rlmParentAgent: options.parentSession.sessionName ?? options.parentSession.sessionId,
 			sessionStartEvent: { type: "session_start", reason: "startup" },
@@ -9119,6 +9168,7 @@ export class AgentSession {
 				session_name: daemonChild?.sessionName ?? run.session?.sessionName ?? run.sessionName,
 				session_dir: run.sessionDir,
 				status: run.status === "done" ? "completed" : run.status === "error" ? "error" : "running",
+				usage_tokens: run.usageTokens,
 			});
 			recorded.add(run.id);
 		}
@@ -9135,6 +9185,7 @@ export class AgentSession {
 			if (!sessionDir) {
 				continue;
 			}
+			const usageTokens = this._rlmChildUsageTokens.get(childId);
 			subagents.push({
 				rlm_child_id: childId,
 				active_session_id: daemonChild?.activeSessionId ?? null,
@@ -9143,6 +9194,7 @@ export class AgentSession {
 					daemonChild?.sessionName ?? childSession.sessionName ?? createDefaultRlmSubagentSessionName("", childId),
 				session_dir: sessionDir,
 				status: "completed",
+				...(usageTokens !== undefined ? { usage_tokens: usageTokens } : {}),
 			});
 			recorded.add(childId);
 		}
@@ -9163,6 +9215,7 @@ export class AgentSession {
 				session_name: daemonChild.sessionName ?? createDefaultRlmSubagentSessionName("", childId),
 				session_dir: daemonChild.sessionDir,
 				status: daemonChild.rlmChildRegistryStatus === "completed" ? "completed" : "error",
+				...(daemonChild.rlmChildUsageTokens !== undefined ? { usage_tokens: daemonChild.rlmChildUsageTokens } : {}),
 			});
 		}
 		return { subagents };
@@ -9329,6 +9382,7 @@ export class AgentSession {
 		this._rlmChildUnsubscribes.get(childId)?.();
 		this._rlmChildUnsubscribes.delete(childId);
 		this._rlmChildSessions.delete(childId);
+		this._rlmChildUsageTokens.delete(childId);
 		this._rlmChildCleanupFailures.delete(childId);
 		if (!run || this._activeRlmChildRuns.get(childId) === run) {
 			this._activeRlmChildRuns.delete(childId);
@@ -9424,18 +9478,26 @@ export class AgentSession {
 	 * the child) when the parent is already tearing down, so the caller can drop the
 	 * matching event forwarder too.
 	 */
-	registerRlmChildSession(childId: string, session: AgentSession, unsubscribe?: () => void): boolean {
+	registerRlmChildSession(
+		childId: string,
+		session: AgentSession,
+		unsubscribe?: () => void,
+		usageTokens?: number,
+	): boolean {
 		// A child can finish concurrently while the parent is (or has) torn down; don't
 		// resurrect the map (it would never be disposed), just drop the child now.
 		if (this._deletingRlmChildren.has(childId) || this._deletedRlmChildIds.has(childId)) {
 			return false;
 		}
-		if (this._subagentRuntimeHost?.completeRlmSubagentRuntime?.(childId, session) === false) {
+		if (this._subagentRuntimeHost?.completeRlmSubagentRuntime?.(childId, session, usageTokens) === false) {
 			return false;
 		}
 		if (this._disposed || this._disposing) {
 			void session.disposeAsync().catch(() => undefined);
 			return false;
+		}
+		if (usageTokens !== undefined) {
+			this._rlmChildUsageTokens.set(childId, usageTokens);
 		}
 		this._rlmChildSessions.set(childId, session);
 		if (unsubscribe) {
@@ -9611,14 +9673,22 @@ export class AgentSession {
 		kwargs: Record<string, unknown> = {},
 		spawnCode?: string,
 	): Promise<RlmSpawnHandle> {
-		const { name: rawName, model: rawModel, cwd: rawCwd, effort: rawEffort, ...unsupported } = kwargs;
+		const {
+			name: rawName,
+			model: rawModel,
+			cwd: rawCwd,
+			effort: rawEffort,
+			capabilities: rawCapabilities,
+			...unsupported
+		} = kwargs;
 		const unsupportedKwargs = Object.keys(unsupported);
 		if (unsupportedKwargs.length > 0) {
 			throw new Error(`Unsupported rlm.run kwargs: ${unsupportedKwargs.sort().join(", ")}`);
 		}
+		const requestedCwd = normalizeRequestedRlmSubagentCwd(rawCwd, this._cwd) ?? this._cwd;
+		const capabilities = normalizeRlmCapabilityManifest(rawCapabilities, requestedCwd, this._rlmCapabilities);
 		const requestedSessionName = normalizeRequestedRlmSubagentSessionName(rawName);
 		const requestedModel = normalizeRequestedRlmSubagentModel(rawModel);
-		const requestedCwd = normalizeRequestedRlmSubagentCwd(rawCwd, this._cwd) ?? this._cwd;
 		const requestedEffort = normalizeRequestedRlmSubagentEffort(rawEffort);
 		if (requestedSessionName) assertDirectAgentMessageTarget(requestedSessionName);
 		if (this._rlmDepth >= this._rlmMaxDepth) {
@@ -9647,6 +9717,7 @@ export class AgentSession {
 
 		const childSessionDir = this._createChildRlmSessionDir();
 		const childNodeId = basename(childSessionDir);
+		persistRlmCapabilityManifest(childSessionDir, capabilities);
 		const sessionName = requestedSessionName ?? createDefaultRlmSubagentSessionName(prompt, childNodeId);
 		if (!requestedSessionName) await this._assertRlmSubagentSessionNameAvailable(sessionName);
 		const startedAt = Date.now();
@@ -9665,6 +9736,7 @@ export class AgentSession {
 			sessionDir: childSessionDir,
 			status: "queued",
 			settled: false,
+			usageTokens: 0,
 			abort: noopRlmChildAbort,
 			publication: createAgentMessageDeferred(),
 		};
@@ -9713,6 +9785,7 @@ export class AgentSession {
 				spawnCode,
 				sessionDir: childSessionDir,
 				cwd: requestedCwd,
+				capabilities,
 				model: modelSelection.model,
 				thinkingLevel: childThinkingLevel,
 			}),
@@ -9768,6 +9841,7 @@ export class AgentSession {
 					} else if (event.type === "message_end" && event.message.role === "assistant") {
 						const assistant = event.message as AssistantMessage;
 						if (assistant.stopReason !== "error" && assistant.stopReason !== "aborted") {
+							run.usageTokens += assistant.usage.totalTokens;
 							attributeChildUsage(parentAssistantForUsage?.usage ?? emptyUsage(), assistant.usage);
 							if (parentAssistantForUsage) {
 								const parentEntry = this._findAssistantEntryForMessage(parentAssistantForUsage);
@@ -9859,7 +9933,7 @@ export class AgentSession {
 						}),
 					);
 				}
-				if (!this.registerRlmChildSession(run.id, child)) {
+				if (!this.registerRlmChildSession(run.id, child, undefined, run.usageTokens)) {
 					if (childRuntime && this._subagentRuntimeHost?.releaseRlmSubagentRuntime) {
 						await this._subagentRuntimeHost
 							.releaseRlmSubagentRuntime(childRuntime, subagentOptions, "error")
@@ -9964,6 +10038,7 @@ export class AgentSession {
 			model: `${modelSelection.model.provider}/${modelSelection.model.id}`,
 			cwd: requestedCwd,
 			effort: childThinkingLevel,
+			capabilities,
 		};
 	}
 

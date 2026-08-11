@@ -360,6 +360,7 @@ export class AgentSessionRuntime implements SubagentRuntimeHost {
 					rlmDepth: options.rlmDepth,
 					rlmMaxDepth: options.rlmMaxDepth,
 					rlmSessionDir: options.sessionDir,
+					capabilities: options.capabilities,
 					rlmParentNodeId: options.rlmParentNodeId,
 					rlmParentAgent: options.parentSession.sessionName ?? options.parentSession.sessionId,
 				},
@@ -411,6 +412,18 @@ export class AgentSessionRuntime implements SubagentRuntimeHost {
 		}
 	}
 
+	private capabilitySessionOptions(): AgentSessionCreationOptions | undefined {
+		const capabilities = this.session.capabilities;
+		if (!capabilities) return undefined;
+		return {
+			capabilities,
+			rlmDepth: this.session.rlmDepth,
+			rlmMaxDepth: this.session.rlmMaxDepth,
+			rlmSessionDir: this.metadata.sessionDir,
+			rlmParentNodeId: this.metadata.rlmParentNodeId,
+		};
+	}
+
 	private async finishSessionReplacement(withSession?: (ctx: ReplacedSessionContext) => Promise<void>): Promise<void> {
 		if (this.rebindSession) {
 			await this.rebindSession(this.session);
@@ -459,6 +472,7 @@ export class AgentSessionRuntime implements SubagentRuntimeHost {
 							previousSessionFile,
 						},
 						sessionConfig: this.sessionConfig,
+						sessionOptions: this.capabilitySessionOptions(),
 					}),
 				),
 			lease,
@@ -502,6 +516,7 @@ export class AgentSessionRuntime implements SubagentRuntimeHost {
 							previousSessionFile,
 						},
 						sessionConfig: this.sessionConfig,
+						sessionOptions: this.capabilitySessionOptions(),
 					}),
 				),
 			lease,
@@ -573,6 +588,7 @@ export class AgentSessionRuntime implements SubagentRuntimeHost {
 									previousSessionFile,
 								},
 								sessionConfig: this.sessionConfig,
+								sessionOptions: this.capabilitySessionOptions(),
 							}),
 						),
 					lease,
@@ -602,6 +618,7 @@ export class AgentSessionRuntime implements SubagentRuntimeHost {
 								previousSessionFile,
 							},
 							sessionConfig: this.sessionConfig,
+							sessionOptions: this.capabilitySessionOptions(),
 						}),
 					),
 				lease,
@@ -635,6 +652,7 @@ export class AgentSessionRuntime implements SubagentRuntimeHost {
 							previousSessionFile,
 						},
 						sessionConfig: this.sessionConfig,
+						sessionOptions: this.capabilitySessionOptions(),
 					}),
 				),
 			lease,
@@ -695,6 +713,7 @@ export class AgentSessionRuntime implements SubagentRuntimeHost {
 							previousSessionFile,
 						},
 						sessionConfig: this.sessionConfig,
+						sessionOptions: this.capabilitySessionOptions(),
 					}),
 				),
 			lease,

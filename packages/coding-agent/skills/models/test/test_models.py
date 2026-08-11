@@ -12,7 +12,23 @@ sys.path.insert(0, str(REPO_ROOT / "prime-agent-runtime" / "src"))
 sys.path.insert(0, str(SKILLS_ROOT / "models" / "src"))
 
 from models import ModelMesh, NoEligibleModel  # noqa: E402
-from rlm import RLMModel, RLMModelCost, RLMSpawnHandle  # noqa: E402
+from rlm import (  # noqa: E402
+    RLMCapabilityManifest,
+    RLMFilesystemCapabilities,
+    RLMModel,
+    RLMModelCost,
+    RLMNetworkCapabilities,
+    RLMProcessCapabilities,
+    RLMSecretCapabilities,
+    RLMSpawnHandle,
+)
+
+TEST_CAPABILITIES = RLMCapabilityManifest(
+    filesystem=RLMFilesystemCapabilities(read=(Path("."),), write=(Path("."),)),
+    network=RLMNetworkCapabilities(allow=(), deny_by_default=True),
+    secrets=RLMSecretCapabilities(allow=()),
+    process=RLMProcessCapabilities(wall_time_ms=1_200_000, max_processes=64),
+)
 
 
 def make_model(
@@ -49,9 +65,17 @@ class ModelMeshTest(unittest.IsolatedAsyncioTestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.catalog = [
-            make_model("cloud/flash-mini", reasoning=False, input_cost=0.1, output_cost=0.4),
+            make_model(
+                "cloud/flash-mini", reasoning=False, input_cost=0.1, output_cost=0.4
+            ),
             make_model("cloud/coder-pro", input_cost=3, output_cost=12),
-            make_model("cloud/reviewer-pro", vision=True, context_window=256_000, input_cost=5, output_cost=20),
+            make_model(
+                "cloud/reviewer-pro",
+                vision=True,
+                context_window=256_000,
+                input_cost=5,
+                output_cost=20,
+            ),
             make_model("local/ollama-coder", input_cost=0, output_cost=0),
         ]
         self.requests: list[tuple[str, int]] = []
@@ -79,7 +103,9 @@ class ModelMeshTest(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(long_context.model.context_window, 128_000)
         self.assertTrue(all(request == ("", 100) for request in self.requests))
 
-    async def test_configured_globs_and_independence_exclusions_are_enforced(self) -> None:
+    async def test_configured_globs_and_independence_exclusions_are_enforced(
+        self,
+    ) -> None:
         await self.mesh.configure(
             "security-review",
             candidates=("cloud/reviewer-*", "cloud/coder-*"),
@@ -125,6 +151,7 @@ class ModelMeshTest(unittest.IsolatedAsyncioTestCase):
             model=pair.maker.selector,
             cwd=self.root,
             effort="high",
+            capabilities=TEST_CAPABILITIES,
         )
         dynamic_checker = await self.mesh.resolve(
             "review",
@@ -142,7 +169,9 @@ class ModelMeshTest(unittest.IsolatedAsyncioTestCase):
             make_model("cloud/reviewer-pro"),
         ]
 
-        with self.assertRaisesRegex(NoEligibleModel, "no authenticated model satisfies route"):
+        with self.assertRaisesRegex(
+            NoEligibleModel, "no authenticated model satisfies route"
+        ):
             await self.mesh.pair(maker_route="code", checker_route="review")
 
     async def test_verified_history_changes_future_routing_and_persists(self) -> None:
@@ -170,10 +199,14 @@ class ModelMeshTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(selected.prior.verified, 5)
         self.assertEqual(selected.prior.mean_duration_ms, 800)
 
-    async def test_missing_capability_never_falls_back_to_ineligible_model(self) -> None:
+    async def test_missing_capability_never_falls_back_to_ineligible_model(
+        self,
+    ) -> None:
         self.catalog = [make_model("cloud/text-only", vision=False)]
 
-        with self.assertRaisesRegex(NoEligibleModel, "no authenticated model satisfies route"):
+        with self.assertRaisesRegex(
+            NoEligibleModel, "no authenticated model satisfies route"
+        ):
             await self.mesh.resolve("vision")
 
 

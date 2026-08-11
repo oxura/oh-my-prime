@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Sequence
+from collections.abc import Sequence
 
 from workspace import PromotionResult, Workspace
 
@@ -19,9 +19,9 @@ from ._models import (
     VerificationError,
     VerificationFailed,
     VerificationReport,
+    WorkspaceDiffAttestation,
 )
 from ._runtime import ProofRuntime, make_command_gate, make_reproducer_gate
-
 
 _default_runtime = ProofRuntime()
 
@@ -105,6 +105,15 @@ async def load_contract(
     return await _default_runtime.load_contract(contract_id, repo=repo)
 
 
+async def load_report(
+    report_id: str,
+    *,
+    repo: str | os.PathLike[str] = ".",
+) -> VerificationReport:
+    """Load and integrity-check a persisted verifier evidence ledger."""
+    return await _default_runtime.load_report(report_id, repo=repo)
+
+
 async def run(
     target: str | Workspace,
     acceptance_contract: AcceptanceContract,
@@ -115,7 +124,9 @@ async def run(
     return await _default_runtime.run(target, acceptance_contract, fail_fast=fail_fast)
 
 
-async def promote(target: str | Workspace, report: VerificationReport) -> PromotionResult:
+async def promote(
+    target: str | Workspace, report: VerificationReport
+) -> PromotionResult:
     """Promote exactly the snapshot attested by a verified report."""
     return await _default_runtime.promote(target, report)
 
@@ -133,9 +144,11 @@ __all__ = [
     "VerificationError",
     "VerificationFailed",
     "VerificationReport",
+    "WorkspaceDiffAttestation",
     "command",
     "contract",
     "load_contract",
+    "load_report",
     "promote",
     "reproducer",
     "run",

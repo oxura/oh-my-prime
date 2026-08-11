@@ -14,6 +14,7 @@ import type { SessionStartEvent, ToolDefinition } from "./extensions/index.js";
 import { McpManager } from "./mcp/mcp-manager.js";
 import { ModelRegistry } from "./model-registry.js";
 import { DefaultResourceLoader, type DefaultResourceLoaderOptions, type ResourceLoader } from "./resource-loader.js";
+import type { RlmCapabilityManifest } from "./rlm-capabilities.js";
 import type { SubagentRuntimeHost } from "./rlm-runtime.js";
 import { type CreateAgentSessionResult, createAgentSession } from "./sdk.js";
 import type { SessionManager } from "./session-manager.js";
@@ -76,6 +77,7 @@ export interface AgentSessionCreationOptions {
 	rlmDepth?: number;
 	rlmMaxDepth?: number;
 	rlmSessionDir?: string;
+	capabilities?: RlmCapabilityManifest;
 	rlmParentNodeId?: string;
 	rlmParentAgent?: string;
 	subagentRuntimeHost?: SubagentRuntimeHost;
@@ -293,6 +295,7 @@ export async function createAgentSessionFromServices(
 		rlmDepth: options.rlmDepth,
 		rlmMaxDepth: options.rlmMaxDepth,
 		rlmSessionDir: options.rlmSessionDir,
+		capabilities: options.capabilities,
 		rlmParentNodeId: options.rlmParentNodeId,
 		rlmParentAgent: options.rlmParentAgent,
 		subagentRuntimeHost: options.subagentRuntimeHost,

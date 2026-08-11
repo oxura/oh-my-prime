@@ -1,4 +1,14 @@
-import { appendFileSync, chmodSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+	appendFileSync,
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -501,6 +511,143 @@ describe("harness refinement", () => {
 		});
 	});
 
+	it("allows direct global prompt, skill, and subagent activation but rejects technical memory", () => {
+		const state = loadHarnessState(makeTempDir(), "global");
+		const created = applyRefinementProposal(
+			state,
+			proposal("Create supported global state", [
+				{
+					action: "create",
+					kind: "prompt",
+					id: "stable_preference",
+					title: "Stable user preference",
+					content: "Prefer concise progress updates.",
+				},
+				{
+					action: "create",
+					kind: "memory",
+					id: "unverified_memory",
+					title: "Unverified memory",
+					content: "Permanent technical claim.",
+				},
+				{
+					action: "create",
+					kind: "skill",
+					id: "direct_skill",
+					title: "Direct skill",
+					content: "Directly managed procedure.",
+					reference: skillReference,
+					arguments: {},
+				},
+				{
+					action: "create",
+					kind: "subagent",
+					id: "direct_subagent",
+					title: "Direct subagent",
+					content: "Directly managed delegation policy.",
+				},
+			]),
+			{ id: "refine_supported_global", scope: "global" },
+		);
+
+		expect(created.appliedEdits.map((edit) => edit.applied)).toEqual([true, false, true, true]);
+		expect(created.appliedEdits[1]).toMatchObject({
+			applied: false,
+			error: "global technical memory activation requires Evolution Lab replay and promotion",
+		});
+		expect(state.entries.memory.unverified_memory).toBeUndefined();
+		expect(state.entries.prompt.stable_preference.scope).toBe("global");
+		expect(state.entries.skill.direct_skill.scope).toBe("global");
+		expect(state.entries.subagent.direct_subagent.scope).toBe("global");
+		seedEntry(state, "memory", "verified_memory");
+		state.entries.memory.verified_memory.scope = "global";
+		const bypassedUpdate = applyRefinementProposal(
+			state,
+			proposal("Bypass global memory policy", [
+				{
+					action: "update",
+					kind: "memory",
+					id: "verified_memory",
+					title: "Verified memory",
+					content: "Unverified update.",
+				},
+			]),
+			{
+				id: "refine_bypass_global_memory",
+				scope: "local",
+				rollbackOf: "legacy_refinement",
+			},
+		);
+		expect(bypassedUpdate.appliedEdits[0]).toMatchObject({
+			applied: false,
+			error: "global technical memory activation requires Evolution Lab replay and promotion",
+		});
+
+		const updated = applyRefinementProposal(
+			state,
+			proposal("Update supported global state", [
+				{
+					action: "update",
+					kind: "prompt",
+					id: "stable_preference",
+					title: "Stable user preference",
+					content: "Prefer concise progress updates with evidence.",
+				},
+				{
+					action: "update",
+					kind: "skill",
+					id: "direct_skill",
+					title: "Direct skill",
+					content: "Updated directly managed procedure.",
+					reference: skillReference,
+					arguments: {},
+				},
+				{
+					action: "update",
+					kind: "subagent",
+					id: "direct_subagent",
+					title: "Direct subagent",
+					content: "Updated directly managed delegation policy.",
+				},
+			]),
+			{ id: "refine_update_supported_global", scope: "global" },
+		);
+
+		expect(updated.appliedEdits.every((edit) => edit.applied)).toBe(true);
+		expect(state.entries.prompt.stable_preference.version).toBe(2);
+		expect(state.entries.skill.direct_skill.version).toBe(2);
+		expect(state.entries.subagent.direct_subagent.version).toBe(2);
+	});
+
+	it("rejects direct deletion of active Evolution memory but deletes safe global entries", () => {
+		const state = loadHarnessState(makeTempDir(), "global");
+		seedEntry(state, "memory", "active_evolution");
+		state.entries.memory.active_evolution.metadata = {
+			evolution_candidate_id: "candidate_active",
+			evolution_status: "active",
+		};
+		seedEntry(state, "memory", "legacy_memory");
+		seedEntry(state, "prompt", "legacy_prompt");
+
+		const result = applyRefinementProposal(
+			state,
+			proposal("Delete global entries", [
+				{ action: "delete", kind: "memory", id: "active_evolution" },
+				{ action: "delete", kind: "memory", id: "legacy_memory" },
+				{ action: "delete", kind: "prompt", id: "legacy_prompt" },
+			]),
+			{ id: "refine_delete_global", scope: "global", rollbackOf: "legacy_refinement" },
+		);
+
+		expect(result.appliedEdits.map((edit) => edit.applied)).toEqual([false, true, true]);
+		expect(result.appliedEdits[0]).toMatchObject({
+			error: "active Evolution memory cannot be deleted directly; use evolve.rollback",
+		});
+		expect(state.entries.memory.active_evolution).toBeDefined();
+		expect(state.entries.memory.legacy_memory).toBeUndefined();
+		expect(state.entries.prompt.legacy_prompt).toBeUndefined();
+	});
+
 	it("requires Python references for harness-created skills", () => {
 		const state = loadHarnessState(makeTempDir());
 
@@ -570,20 +717,21 @@ describe("harness refinement", () => {
 			proposal("Global note", [
 				{
 					action: "create",
-					kind: "memory",
+					kind: "prompt",
 					id: "shared",
 					title: "Shared",
 					content: "Global content.",
 				},
 			]),
-			{ id: "refine_global", scope: "global" },
+			{ id: "seed_global_fixture", scope: "local" },
 		);
+		globalState.entries.prompt.shared.scope = "global";
 		applyRefinementProposal(
 			localState,
 			proposal("Local note", [
 				{
 					action: "create",
-					kind: "memory",
+					kind: "prompt",
 					id: "shared",
 					title: "Shared",
 					content: "Local content.",
@@ -594,20 +742,20 @@ describe("harness refinement", () => {
 
 		const merged = mergeHarnessStates(globalState, localState);
 
-		expect(merged.entries.memory.shared.content).toBe("Global content.");
-		expect(merged.entries.memory.shared.scope).toBe("global");
-		expect(merged.entries.memory["local:shared"]).toMatchObject({
+		expect(merged.entries.prompt.shared.content).toBe("Global content.");
+		expect(merged.entries.prompt.shared.scope).toBe("global");
+		expect(merged.entries.prompt["local:shared"]).toMatchObject({
 			id: "shared",
 			content: "Local content.",
 			scope: "local",
 		});
-		expect(Object.values(merged.entries.memory).map((entry) => `${entry.scope}:${entry.content}`)).toEqual(
+		expect(Object.values(merged.entries.prompt).map((entry) => `${entry.scope}:${entry.content}`)).toEqual(
 			expect.arrayContaining(["global:Global content.", "local:Local content."]),
 		);
 		const promptOverview = formatHarnessStateForPrompt(merged);
 		expect(promptOverview).toContain("[global:shared]");
 		expect(promptOverview).toContain("[local:shared]");
-		expect(globalState.entries.memory.shared.scope).toBe("global");
+		expect(globalState.entries.prompt.shared.scope).toBe("global");
 	});
 
 	it("preserves entry scope stored inside the global harness file", () => {
@@ -665,6 +813,43 @@ describe("harness refinement", () => {
 			trigger: "Add prompt note",
 			changes: ["create prompt:focused_edits"],
 		});
+	});
+	it("rejects a stale harness snapshot after a concurrent locked save", () => {
+		const dir = makeTempDir();
+		const first = loadHarnessState(dir, "local");
+		const stale = loadHarnessState(dir, "local");
+		first.entries.prompt.first = {
+			id: "first",
+			kind: "prompt",
+			title: "First",
+			content: "concurrent content",
+			path: "policy",
+			scope: "local",
+			reference: {},
+			arguments: {},
+			metadata: {},
+			source: "test",
+			created_at: new Date().toISOString(),
+			updated_at: new Date().toISOString(),
+			version: 1,
+		};
+		saveHarnessState(dir, first);
+
+		expect(() => saveHarnessState(dir, stale)).toThrow("harness state changed before the locked save");
+		expect(loadHarnessState(dir, "local").entries.prompt.first.content).toBe("concurrent content");
+	});
+
+	it("does not overwrite harness state while Evolution holds the shared lock", () => {
+		const dir = makeTempDir();
+		const state = loadHarnessState(dir, "local");
+		const lockPath = join(dir, ".harness_state.json.evolution.lock");
+		mkdirSync(lockPath);
+		try {
+			expect(() => saveHarnessState(dir, state)).toThrow(/lock/i);
+			expect(existsSync(getHarnessStatePath(dir))).toBe(false);
+		} finally {
+			rmSync(lockPath, { recursive: true, force: true });
+		}
 	});
 
 	it.each(["not json at all", "null", "[]", '"a string"', "123"])(
@@ -1021,6 +1206,14 @@ describe("harness refinement", () => {
 		});
 		expect(completeSimpleMock.mock.calls[0][1]).toMatchObject({
 			systemPrompt: expect.stringContaining("A caller may explicitly request global refinement"),
+		});
+		expect(completeSimpleMock.mock.calls[0][1]).toMatchObject({
+			systemPrompt: expect.stringContaining(
+				"Direct global prompt, skill, and subagent creates and updates remain supported",
+			),
+		});
+		expect(completeSimpleMock.mock.calls[0][1]).toMatchObject({
+			systemPrompt: expect.stringContaining("Never directly delete active Evolution memory; use `evolve.rollback`"),
 		});
 		expect(completeSimpleMock.mock.calls[0][1]).toMatchObject({
 			systemPrompt: expect.stringContaining("Always use the bare id (no prefix) in edits"),
@@ -1390,7 +1583,9 @@ describe("global refinement history", () => {
 
 		const userPrompt = completeSimpleMock.mock.calls[0][1].messages[0].content[0].text;
 		expect(userPrompt).toContain("Requested refinement scope: global");
-		expect(userPrompt).toContain("Do not persist session-only progress");
+		expect(userPrompt).toContain("Creating or updating global technical memory is forbidden");
+		expect(userPrompt).toContain("stable user preference prompt entries");
+		expect(userPrompt).toContain("use evolve.rollback");
 	});
 
 	it("plans a rollback without mutating harness state", async () => {
@@ -1458,13 +1653,13 @@ describe("global refinement history", () => {
 			proposal("Global refinement", [
 				{
 					action: "create",
-					kind: "memory",
+					kind: "prompt",
 					id: "global_memory",
 					title: "Global memory",
 					content: "Created globally.",
 				},
 			]),
-			{ id: "refine_global_target", scope: "global" },
+			{ id: "refine_global_target", scope: "global", rollbackOf: "fixture_seed" },
 		);
 		expect(target.scope).toBe("global");
 
@@ -1480,7 +1675,7 @@ describe("global refinement history", () => {
 			scope: plan.rollbackScope,
 		});
 		expect(rollback.scope).toBe("global");
-		expect(state.entries.memory.global_memory).toBeUndefined();
+		expect(state.entries.prompt.global_memory).toBeUndefined();
 	});
 
 	it("infers rollback scope from legacy global edits without top-level scope", async () => {
@@ -1491,13 +1686,13 @@ describe("global refinement history", () => {
 			proposal("Legacy global refinement", [
 				{
 					action: "create",
-					kind: "memory",
+					kind: "prompt",
 					id: "legacy_global_memory",
 					title: "Legacy global memory",
 					content: "Created globally before result.scope existed.",
 				},
 			]),
-			{ id: "refine_legacy_global", scope: "global" },
+			{ id: "refine_legacy_global", scope: "global", rollbackOf: "legacy_fixture_seed" },
 		);
 		const legacyTarget = {
 			...target,

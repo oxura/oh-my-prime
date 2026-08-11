@@ -1,108 +1,154 @@
-<p align="center">
-  <a href="https://primeintellect.ai">
-    <picture>
-      <source media="(prefers-color-scheme: light)" srcset="https://github.com/user-attachments/assets/40c36e38-c5bd-4c5a-9cb3-f7b902cd155d">
-      <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/6414bc9b-126b-41ca-9307-9e982430cde8">
-      <img alt="Prime Intellect" src="https://github.com/user-attachments/assets/6414bc9b-126b-41ca-9307-9e982430cde8" width="312" style="max-width: 100%;">
-    </picture>
-  </a>
-</p>
+<h1 align="center">Oh My Prime</h1>
 
-<h3 align="center">
-Prime Agent: A Self-Improving RLM Agent
-</h3>
+<p align="center">
+  Verified Recursive Agent Runtime
+</p>
 
 <p align="center">
   <a href="packages/coding-agent/docs/index.md">Documentation</a> &bull;
-  <a href="https://github.com/PrimeIntellect-ai/verifiers">Verifiers</a> &bull;
-  <a href="https://github.com/PrimeIntellect-ai/prime-rl">PRIME-RL</a> &bull;
-  <a href="https://github.com/badlogic/pi-mono">pi-mono</a>
+  <a href="packages/coding-agent/docs/rlm.md">RLM runtime</a> &bull;
+  <a href="https://github.com/PrimeIntellect-ai/prime-agent">Upstream Prime Agent</a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/PrimeIntellect-ai/prime-agent/actions/workflows/ci.yml">
-    <img src="https://github.com/PrimeIntellect-ai/prime-agent/actions/workflows/ci.yml/badge.svg" alt="CI" />
-  </a>
-  <a href="https://github.com/PrimeIntellect-ai/prime-agent/actions/workflows/build-binaries.yml">
-    <img src="https://github.com/PrimeIntellect-ai/prime-agent/actions/workflows/build-binaries.yml/badge.svg" alt="Build Binaries" />
+  <a href="https://github.com/oxura/oh-my-prime/actions/workflows/ci.yml">
+    <img src="https://github.com/oxura/oh-my-prime/actions/workflows/ci.yml/badge.svg" alt="CI" />
   </a>
 </p>
 
-Prime Agent is an open-source coding and research agent for general and long-running work. It is designed around two core abstractions:
+Oh My Prime is a fork of [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) built around one loop:
 
-- The **[Recursive Language Model (RLM)](https://www.primeintellect.ai/blog/rlm)** treats context as variables (*prompt-as-a-variable*) and tools like recursive subagents as function calls (*programmatic tool /sub-agent calling*) inside a persistent REPL.
-- The **[Continual Harness](https://arxiv.org/abs/2605.09998)** stores supplemental prompts, memories, skill descriptions, and reusable subagent specifications as durable state that Prime Agent can refine through small, evidence-backed updates, local to the session by default.
-
-Prime Agent combines a persistent Python control environment with durable harness state, so useful working context and reusable operating patterns can outlive a single chat window.
-
-- **Everything is programmatic:** persistent IPython is the built-in model tool; file operations, shell commands, tool use, subagents, and context management happen through code.
-- **Subagents are built in:** `rlm(...)` spawns real child agents for parallel or background work and returns their results programmatically.
-- **The harness can improve:** `/refine` reviews the current trajectory and can apply small, evidence-backed updates to supplemental harness state. It never rewrites the immutable base system prompt, and recorded snapshots support rollback.
-- **Skills are executable:** skills are importable Python packages, and the built-in skill creator can turn recurring workflows into project or personal skills.
-- **Sessions run in the background:** daemon-backed agents keep running when the terminal disconnects and can be reattached later.
-- **Agents communicate directly:** running agents can exchange messages and orchestrate one another without routing everything through the user.
-- **Long tasks keep moving:** automatic compaction, persistent goals, heartbeats, schedules, autonomous mode, and retained subagents preserve progress across turns and terminal sessions.
-
-## Getting Started
-
-Install the latest stable release on macOS or Linux:
-
-```bash
-curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh
+```text
+Explore -> Prove -> Promote -> Learn
 ```
 
-The installer downloads a versioned release, verifies its SHA-256 checksum, installs the `prime-agent` command, and can prepare the IPython runtime used by the agent.
+The inherited Prime Agent core provides a persistent IPython control plane, recursive agents, daemon-backed sessions, direct agent messaging, persistent goals, and a continual harness. Oh My Prime adds a verification layer that explores competing implementations in isolated workspaces, runs deterministic acceptance contracts, promotes only the exact verified patch, and learns only from evidence that remains valid.
 
-Start Prime Agent from the repository or directory you want it to work in:
+This is not a collection of extra model tools. The new capabilities are Python modules inside the same persistent control plane:
+
+- **ProofTree:** runs deliberately different strategies in independent Git worktrees, verifies every candidate against one immutable contract, and never selects a least-bad failure.
+- **Verifier Fabric:** binds requirements and reproducer or command gates to the repository revision, records deterministic evidence, and gates promotion on the exact candidate patch hash.
+- **Isolated Workspace Manager:** creates durable candidate worktrees, produces binary-safe patch snapshots, detects stale branches, and applies only an attested patch.
+- **Model Mesh:** routes semantic roles such as `fast`, `code`, `deep`, and `review` using authenticated capabilities, cost, local verified outcomes, and maker/checker independence.
+- **Code Atlas and Context Compiler:** maintain a content-addressed semantic graph, compile budget-bounded context with provenance, report transitive impact, and reject stale source snapshots.
+- **Evolution Lab:** keeps hypotheses separate from verified knowledge and requires replay, shadow evaluation, and transactional promotion before changing active harness memory.
+- **Flow Runtime:** persists dependency-aware task graphs with typed content-addressed artifacts, retries, budgets, resource locks, quorum joins, cancellation, and restart recovery.
+- **Capability Sandbox:** gives every RLM child an immutable, non-widening filesystem, network, secret, and process manifest. Supported hosts enforce it through Sandbox Runtime and OS primitives; child startup fails closed when enforcement cannot be established.
+
+## Quick Start
+
+Requirements: Node.js 22 or newer, npm 11.10 or newer, Git, and Python 3.10 or newer.
+
+Linux child sandboxes also require `ripgrep`, `bubblewrap`, and `socat` from the system package manager (for example, `sudo apt install ripgrep bubblewrap socat` or `sudo dnf install ripgrep bubblewrap socat`). macOS uses the built-in sandbox runtime.
 
 ```bash
-cd /path/to/project
-prime-agent
+git clone https://github.com/oxura/oh-my-prime.git
+cd oh-my-prime
+npm install
+./prime-agent.sh
 ```
 
-On first launch, run `/login` to choose a subscription or API-key provider. Prime Agent works in the current directory and can run commands and modify files there. Use a disposable clone, clean worktree, or another checkpoint you can inspect and restore.
+The fork currently retains the upstream `prime-agent` CLI and configuration names. On first launch, use `/login` to configure a subscription or API-key provider.
 
-> [!WARNING]
-> Prime Agent executes model-generated Python and project commands with your user permissions. Its worker and kernel processes improve lifecycle isolation and recovery; they are **not** a security sandbox. Review changes and use trusted repositories, instructions, skills, and extensions only. Run untrusted code or instructions in an external sandbox or restricted environment.
+## ProofTree Example
 
-Useful commands:
+`prime`, `prove`, and `workspace` are preloaded in the persistent IPython kernel:
 
-```bash
-prime-agent agents                   # Browse running, idle, and saved sessions
-prime-agent attach <agent>           # Reattach to a running session
-prime-agent --resume <path|id>       # Resume a saved session
-prime-agent status                   # Inspect background service state
-prime-agent doctor [--fix]           # Inspect or repair background services
-prime-agent update [--force]         # Update Prime Agent
-prime-agent shutdown [--force]       # Stop every agent, worker, and background service
+```python
+contract = await prove.contract(
+    "Prevent duplicate queue claims",
+    requirements=[
+        prove.Requirement("NO-DUP", "A job is never owned by two workers"),
+        prove.Requirement("NO-LOSS", "Every queued job remains claimable"),
+    ],
+    gates=[
+        prove.reproducer(
+            ["python", "tests/reproduce_duplicate_claim.py"],
+            id="duplicate-reproducer",
+            proves=["NO-DUP"],
+        ),
+        prove.command(
+            ["npm", "run", "check"],
+            id="repository-check",
+            proves=["NO-LOSS"],
+        ),
+    ],
+)
+
+run = await prime.explore(
+    "Prevent duplicate queue claims",
+    contract=contract,
+    candidates=4,
+    strategies=["root-cause", "minimal-fix", "adversarial", "concurrency-first"],
+)
+
+await run.wait(timeout_seconds=3600)
+winner = await run.best_verified(max_parallel=2)
+result = await winner.promote()
 ```
 
-## Built for Long-Running Work
-Prime Agent is built for long-running work, especially for evaluations in research. These features are available in the TUI, and when run autonomously.
+Every candidate receives a separate complete session workspace. The checker receives the contract, immutable diff, command output, and evidence ledger rather than the implementer's confidence. If no candidate is fully verified, `best_verified()` raises and preserves the branches for diagnosis.
 
-- **Continual Harness:** `/refine` can persist focused, reviewable lessons as supplemental prompts, memories, reusable skill descriptions, or subagent specifications, with recorded refinement history. It does not replace packaging and reviewing new executable skills.
-- **Direct agent-to-agent communication:** running agents and retained subagents can discover one another, exchange messages, and steer active work.
-- **Daemon-backed continuity:** active sessions, IPython state, schedules, and subagents keep running when the terminal detaches and can be reattached later.
-- **Heartbeats and schedules:** `/heartbeat`, `rlm_heartbeat`, and `prime-agent schedule` can re-enter a session periodically or at a specific time.
-- **Persistent goals:** `/goal` keeps an objective and its progress active across turns until it is completed, paused, or cleared.
-- **Bounded autonomous mode:** `/autonomous` continues within configured turn, token, and time budgets and can run user-defined quality gates. A passed gate checks only what that gate verifies; reaching a limit does not imply task success.
+## Durable Orchestration
+
+Use Flow when recursive work has dependencies or must survive a restart:
+
+```python
+run = await flow.create(
+    "Migrate the service safely",
+    budget=flow.FlowBudget(
+        max_attempts=20,
+        max_failures=4,
+        max_tokens=250_000,
+        wall_time_seconds=3600,
+    ),
+    max_parallel=4,
+)
+
+audit = await run.task(
+    "Audit the architecture",
+    route="fast",
+    produces=(flow.ArtifactSpec("architecture", required_keys=("modules", "risks")),),
+)
+design = await run.task(
+    "Design the migration",
+    route="deep",
+    requires=(audit.id,),
+    consumes=("architecture",),
+    produces=(flow.ArtifactSpec("plan", required_keys=("steps",)),),
+)
+
+result = await run.run()
+```
+
+Flow treats terminal model output as untrusted until every declared artifact exists and validates. Succeeded tasks are never rerun during recovery.
+
+## Security Boundary
+
+The top-level session still executes model-generated Python and project commands with the current user's permissions. Capability manifests apply to RLM child kernels; host-side extensions and custom tools remain outside that boundary. Use trusted repositories and extensions, inspect promoted patches, and use a stronger external sandbox for hostile host-side code.
+
+The default child manifest grants read and write access only to the selected child workspace, denies outbound domains and inherited secrets, limits the process tree, and expires the child after a bounded wall time. Nested children may narrow that manifest but cannot widen it.
 
 ## Documentation
 
-- [Quickstart](packages/coding-agent/docs/quickstart.md) — install, authenticate, and run a first session
-- [Usage and CLI reference](packages/coding-agent/docs/usage.md) — commands, sessions, autonomous limits, and output modes
-- [Long-running and background agents](packages/coding-agent/docs/long-running-agents.md) — detach and reattach, goals, heartbeats, and schedules
-- [RLM programming model](packages/coding-agent/docs/rlm.md) — persistent IPython, subagents, skills, and the trust model
-- [JSON mode](packages/coding-agent/docs/json.md) and [RPC mode](packages/coding-agent/docs/rpc.md) — headless automation and integrations
-- [Skills](packages/coding-agent/docs/skills.md) — install and create reusable capabilities
-- [Provider setup](packages/coding-agent/docs/providers.md) — subscription and API-key providers
-- [Architecture overview](packages/coding-agent/docs/architecture.md) — daemon, worker, kernel, and persistence boundaries
-- [Development](packages/coding-agent/docs/development.md) — build and run from source
+- [Quickstart](packages/coding-agent/docs/quickstart.md)
+- [Usage and CLI reference](packages/coding-agent/docs/usage.md)
+- [RLM programming model and capability manifests](packages/coding-agent/docs/rlm.md)
+- [Isolated Workspace Manager](packages/coding-agent/skills/workspace/SKILL.md)
+- [Verifier Fabric](packages/coding-agent/skills/prove/SKILL.md)
+- [ProofTree](packages/coding-agent/skills/prime/SKILL.md)
+- [Model Mesh](packages/coding-agent/skills/models/SKILL.md)
+- [Code Atlas](packages/coding-agent/skills/atlas/SKILL.md)
+- [Evolution Lab](packages/coding-agent/skills/evolve/SKILL.md)
+- [Flow Runtime](packages/coding-agent/skills/flow/SKILL.md)
+- [Long-running agents](packages/coding-agent/docs/long-running-agents.md)
+- [Architecture](packages/coding-agent/docs/architecture.md)
+- [Development](packages/coding-agent/docs/development.md)
 
 ## Acknowledgements
 
-Our agent and TUI is built on top of [`pi`](https://github.com/earendil-works/pi). We thank the authors of `pi` for their valuable work.
+Oh My Prime is based on [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent), which is built on [`pi`](https://github.com/earendil-works/pi). The upstream projects remain the source of the persistent IPython, recursive-agent, daemon, session, and terminal foundations.
 
 ## License
 
-Prime Agent is fully open source and released under the [MIT License](LICENSE).
+Oh My Prime is released under the [MIT License](LICENSE).

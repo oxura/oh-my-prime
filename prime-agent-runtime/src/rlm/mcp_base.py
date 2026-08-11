@@ -98,7 +98,7 @@ def _resolve_streamable_http():
     both with *different* signatures. Imported lazily so importing an integration
     package never hard-fails when ``mcp`` is absent.
     """
-    from mcp.client import streamable_http as mod  # noqa: PLC0415
+    from mcp.client import streamable_http as mod
 
     for name in ("streamablehttp_client", "streamable_http_client"):
         fn = getattr(mod, name, None)
@@ -210,9 +210,9 @@ class McpIntegration:
         streamable HTTP with a Bearer token from auth.json. The URL comes from the
         host (mcpServers override) when available, else ``self.url``.
         """
-        import inspect  # noqa: PLC0415
+        import inspect
 
-        from mcp import ClientSession  # noqa: PLC0415
+        from mcp import ClientSession
 
         url, extra_headers = await self._resolve_config()
         if not url:
@@ -229,9 +229,11 @@ class McpIntegration:
         if "headers" in params:
             cm = transport(url, headers=auth_header)
         elif "http_client" in params:
-            import httpx  # noqa: PLC0415
+            import httpx
 
-            client = await stack.enter_async_context(httpx.AsyncClient(headers=auth_header))
+            client = await stack.enter_async_context(
+                httpx.AsyncClient(headers=auth_header)
+            )
             cm = transport(url, http_client=client)
         else:
             raise RuntimeError(
@@ -268,7 +270,9 @@ class McpIntegration:
                     for t in resp.tools
                 }
 
-    async def call_tool(self, tool: str, arguments: dict[str, Any] | None = None) -> Any:
+    async def call_tool(
+        self, tool: str, arguments: dict[str, Any] | None = None
+    ) -> Any:
         """Call ``tool`` on the server and return its parsed result.
 
         Opens a fresh session per call: MCP sessions are not safe to hold across
@@ -299,7 +303,9 @@ class McpIntegration:
         if self._tools and name in self._tools:
             schema = self._tools[name].get("inputSchema") or {}
             desc = self._tools[name].get("description") or ""
-            _call.__doc__ = f"{desc}\n\nArguments (JSON Schema):\n{json.dumps(schema, indent=2)}"
+            _call.__doc__ = (
+                f"{desc}\n\nArguments (JSON Schema):\n{json.dumps(schema, indent=2)}"
+            )
         return _call
 
 
@@ -327,5 +333,7 @@ def _parse_result(result: Any) -> Any:
     # rather than the opaque SDK object so callers get usable data.
     blocks = getattr(result, "content", None) or []
     if blocks:
-        return [b.model_dump(mode="json") if hasattr(b, "model_dump") else b for b in blocks]
+        return [
+            b.model_dump(mode="json") if hasattr(b, "model_dump") else b for b in blocks
+        ]
     return result

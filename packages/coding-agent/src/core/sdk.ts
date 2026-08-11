@@ -15,6 +15,7 @@ import { ModelRegistry } from "./model-registry.js";
 import { findInitialModel } from "./model-resolver.js";
 import type { ResourceLoader } from "./resource-loader.js";
 import { DefaultResourceLoader } from "./resource-loader.js";
+import { loadPersistedRlmCapabilityManifest, normalizeRlmCapabilityManifest } from "./rlm-capabilities.js";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.js";
 import { SettingsManager } from "./settings-manager.js";
 import { time } from "./timings.js";
@@ -99,6 +100,7 @@ export type {
 	ToolDefinition,
 } from "./extensions/index.js";
 export type { PromptTemplate } from "./prompt-templates.js";
+export type { RlmCapabilityManifest } from "./rlm-capabilities.js";
 export type { CreateRlmSubagentRuntimeOptions, RlmSubagentRuntime, SubagentRuntimeHost } from "./rlm-runtime.js";
 export type { Skill } from "./skills.js";
 export type { Tool } from "./tools/index.js";
@@ -165,6 +167,27 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
 	const sessionManager = options.sessionManager ?? SessionManager.create(cwd, getDefaultSessionDir(cwd, agentDir));
+	const effectiveRlmDepth = options.rlmDepth ?? sessionManager.getHeader()?.rlmDepth;
+	let capabilities = options.capabilities;
+	if (typeof effectiveRlmDepth === "number" && effectiveRlmDepth > 0) {
+		const persistedCapabilities = loadPersistedRlmCapabilityManifest(
+			options.rlmSessionDir ?? sessionManager.getSessionDir(),
+			cwd,
+		);
+		if (persistedCapabilities) {
+			if (
+				capabilities &&
+				JSON.stringify(normalizeRlmCapabilityManifest(capabilities, cwd)) !== JSON.stringify(persistedCapabilities)
+			) {
+				throw new Error("RLM child capability manifest disagrees with its persisted attestation");
+			}
+			capabilities = persistedCapabilities;
+		} else if (!capabilities) {
+			throw new Error("RLM child capability manifest is missing; refusing unsandboxed recovery");
+		} else {
+			capabilities = normalizeRlmCapabilityManifest(capabilities, cwd);
+		}
+	}
 
 	// Ensure MCP providers are registered and built-in MCP skills are gated by
 	// auth even on the bare SDK path (not just the CLI's createAgentSessionServices).
@@ -390,6 +413,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		rlmDepth: options.rlmDepth,
 		rlmMaxDepth: options.rlmMaxDepth,
 		rlmSessionDir: options.rlmSessionDir,
+		capabilities,
 		rlmParentNodeId: options.rlmParentNodeId,
 		rlmParentAgent: options.rlmParentAgent,
 		subagentRuntimeHost: options.subagentRuntimeHost,

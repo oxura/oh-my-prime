@@ -1,30 +1,34 @@
-# Prime Agent Documentation
+# Oh My Prime Documentation
 
-Prime Agent is an RLM-native coding and research harness built around a persistent IPython kernel, recursive subagents, durable sessions, and a multi-process local runtime. It began as a hard fork of pi-mono, but Prime Agent is now the product, CLI, install source, and development repository.
+Oh My Prime is a verified recursive agent runtime built on Prime Agent's persistent IPython kernel, recursive subagents, durable sessions, and multi-process local runtime. It adds isolated speculative execution, deterministic evidence gates, exact-patch promotion, semantic routing, repository intelligence, proof-backed learning, durable task graphs, and capability-constrained child kernels.
 
 ## Quick Start
 
-Install the latest stable release on Linux or macOS:
+Run the fork from source on Linux or macOS:
 
 ```bash
-curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh
+git clone https://github.com/oxura/oh-my-prime.git
+cd oh-my-prime
+npm install
+./prime-agent.sh
 ```
 
-Then run it in a project directory:
+The fork currently retains the `prime-agent` command and configuration paths. Authenticate with `/login` for subscription or stored API-key providers, or set an environment variable such as `ANTHROPIC_API_KEY` before launch.
 
-```bash
-cd /path/to/project
-prime-agent
-```
+## Verified Runtime
 
-Authenticate with `/login` for subscription or stored API-key providers, or set an environment variable such as `ANTHROPIC_API_KEY` before launch. See the [Quickstart](quickstart.md) for the complete first-run flow.
-
-Public releases are currently installed from versioned release artifacts. The inherited npm workspace names in the source tree are implementation details, not the public install path.
+- [ProofTree](../skills/prime/SKILL.md) - explore strategy-diverse implementations and select only a fully verified branch.
+- [Verifier Fabric](../skills/prove/SKILL.md) - commit-bound acceptance contracts, bug reproducers, evidence ledgers, and exact-patch promotion.
+- [Workspace Manager](../skills/workspace/SKILL.md) - durable isolated Git worktrees and stale-safe promotion.
+- [Model Mesh](../skills/models/SKILL.md) - semantic routes, capability-aware selection, local verified outcomes, and maker/checker separation.
+- [Code Atlas](../skills/atlas/SKILL.md) - semantic repository graph, provenance-rich context capsules, and impact analysis.
+- [Evolution Lab](../skills/evolve/SKILL.md) - verified memory candidates, replay, shadow evaluation, promotion, and rollback.
+- [Flow Runtime](../skills/flow/SKILL.md) - durable task graphs, typed artifacts, budgets, retries, resource locks, quorum joins, and recovery.
 
 ## Start Here
 
 - [Quickstart](quickstart.md) - install, authenticate, and run a first session.
-- [Using Prime Agent](usage.md) - interactive mode, RLM subagents, slash commands, context files, and CLI reference.
+- [Using Oh My Prime](usage.md) - interactive mode, RLM subagents, slash commands, context files, and CLI reference.
 - [Architecture overview](architecture.md) - client, daemon, worker, session, kernel, provider, and storage boundaries.
 - [RLM programming model](rlm.md) - programmatic execution, native subagents, Python skills, and durable state.
 - [Long-running and background agents](long-running-agents.md) - daemon workers, messaging, heartbeats, goals, schedules, and autonomous mode.

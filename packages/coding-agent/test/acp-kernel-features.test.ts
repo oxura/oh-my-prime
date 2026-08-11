@@ -85,26 +85,25 @@ describe("ACP mode over a real IPython kernel", () => {
 	);
 
 	it(
-		"runs continual-harness CRUD in the kernel and can represent the result over ACP",
+		"runs local continual-harness CRUD in the kernel and rejects global activation",
 		{ tags: ["kernel-heavy"], timeout: 180_000 },
 		async () => {
 			provisioner = new IpythonKernelProvisioner(tempDir, {
 				pythonSkills: [AGENT_MESSAGE_SKILL],
-				env: { RLM_GLOBAL_HARNESS_STATE_DIR: join(tempDir, "harness") },
+				env: { RLM_HARNESS_STATE_DIR: join(tempDir, "harness") },
 			});
 			const manager = await provisioner.ensure();
 
 			const allKinds = await manager.execute(`
 import json
-mem = rlm.harness.create_memory(title="m", content="memory content", global_=True)
-note = rlm.harness.create_prompt_note(title="n", content="prompt note content", global_=True)
-spec = rlm.harness.create_subagent(title="s", content="subagent spec content", global_=True)
+mem = rlm.harness.create_memory(title="m", content="memory content")
+note = rlm.harness.create_prompt_note(title="n", content="prompt note content")
+spec = rlm.harness.create_subagent(title="s", content="subagent spec content")
 skill = rlm.harness.create_skill(
     title="k",
     content="skill content",
     reference={"type": "python", "import": "pkg.mod", "callable": "run", "call_pattern": "await run(...)"},
     arguments={"x": {"type": "string", "required": True, "description": "input"}},
-    global_=True,
 )
 print(json.dumps({
     "kinds": sorted([mem.kind, note.kind, spec.kind, skill.kind]),
@@ -124,12 +123,11 @@ import json
 entry = rlm.harness.create_memory(
     title="ACP verification memory",
     content="ACP mode preserves continual harness CRUD.",
-    global_=True,
 )
-found = rlm.harness.get("memory", entry.id, global_=True)
-listed = [item.id for item in rlm.harness.list("memory", global_=True)]
-deleted = rlm.harness.delete("memory", entry.id, global_=True)
-after = rlm.harness.get("memory", entry.id, global_=True)
+found = rlm.harness.get("memory", entry.id)
+listed = [item.id for item in rlm.harness.list("memory")]
+deleted = rlm.harness.delete("memory", entry.id)
+after = rlm.harness.get("memory", entry.id)
 print(json.dumps({
     "created": entry.id,
     "found": found.title if found else None,
@@ -144,6 +142,15 @@ print(json.dumps({
 			expect(payload.listed).toContain(payload.created);
 			expect(payload.deleted).toBe(true);
 			expect(payload.after).toBeNull();
+
+			const blocked = await manager.execute(`
+try:
+    rlm.harness.create_memory(title="unsafe", content="unverified", global_=True)
+except PermissionError as error:
+    print(str(error))
+`);
+			expect(blocked.status, why(blocked)).toBe("ok");
+			expect(blocked.stdout).toContain("Evolution Lab replay and promotion");
 
 			// A refinement outcome for that CRUD is expressible as namespaced metadata.
 			const refined = acpUpdatesForSessionEvent({

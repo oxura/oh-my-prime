@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from workspace import FileChange
 
 GateKind = Literal["command", "reproducer"]
 Expectation = Literal["success", "failure"]
@@ -116,6 +117,29 @@ class RequirementResult:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkspaceDiffAttestation:
+    """Canonical persisted evidence for one workspace diff snapshot."""
+
+    workspace_id: str
+    base_commit: str
+    evidence_path: Path
+    evidence_sha256: str
+    patch_path: Path
+    patch_sha256: str
+    files: tuple[FileChange, ...]
+
+    @property
+    def files_changed(self) -> int:
+        return len(self.files)
+
+    @property
+    def is_empty(self) -> bool:
+        return self.patch_sha256 == (
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class VerificationReport:
     """Verifier decision plus a content-addressed evidence ledger."""
 
@@ -126,6 +150,8 @@ class VerificationReport:
     status: VerificationStatus
     patch_sha256: str
     files_changed: int
+    initial_diff: WorkspaceDiffAttestation
+    final_diff: WorkspaceDiffAttestation
     gate_results: tuple[GateResult, ...]
     requirement_results: tuple[RequirementResult, ...]
     started_at: str
@@ -134,6 +160,7 @@ class VerificationReport:
     artifact_dir: Path
     report_path: Path
     limitations: tuple[str, ...]
+    digest: str
 
     @property
     def verified(self) -> bool:
@@ -143,7 +170,7 @@ class VerificationReport:
     def required_gates_passed(self) -> int:
         return sum(result.required and result.passed for result in self.gate_results)
 
-    def require_verified(self) -> "VerificationReport":
+    def require_verified(self) -> VerificationReport:
         if not self.verified:
             raise VerificationFailed(
                 f"verification report {self.id} is {self.status!r}, not 'verified'"

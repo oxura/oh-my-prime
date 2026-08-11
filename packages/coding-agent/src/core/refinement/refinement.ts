@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
 	appendFileSync,
 	existsSync,
@@ -13,6 +13,7 @@ import { join } from "node:path";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai";
+import { lockSync } from "proper-lockfile";
 import { getAgentDir } from "../../config.js";
 import { serializeConversation } from "../compaction/utils.js";
 import { convertToLlm } from "../messages.js";
@@ -22,10 +23,21 @@ export const REFINEMENT_CUSTOM_TYPE = "prime-agent.refinement";
 
 export const REFINE_SKILL_NAME = "refine";
 const HARNESS_STATE_DIR_NAME = "harness";
+const HARNESS_STATE_FILE_NAME = "harness_state.json";
 const REFINEMENT_HISTORY_FILE_NAME = "refinements.jsonl";
 const DEFAULT_OVERVIEW_ENTRY_LIMIT = 6;
 const DEFAULT_OVERVIEW_REFINEMENT_LIMIT = 5;
 const DEFAULT_OVERVIEW_CONTENT_LIMIT = 180;
+const harnessStateBaselines = new WeakMap<HarnessState, string | null>();
+
+function harnessContentDigest(content: string): string {
+	return createHash("sha256").update(content).digest("hex");
+}
+
+function trackHarnessBaseline(state: HarnessState, content: string | null): HarnessState {
+	harnessStateBaselines.set(state, content === null ? null : harnessContentDigest(content));
+	return state;
+}
 
 export type RefinementKind = "prompt" | "memory" | "skill" | "subagent";
 export type RefinementAction = "create" | "update" | "delete";
@@ -132,20 +144,25 @@ Use "continual harness" for that persistent artifact layer; keep "RLM" for the
 runtime, IPython kernel, and native call interface that executes those artifacts.
 
 Continual harness components:
-- prompt: supplemental prompt notes only. The base system prompt is immutable and MUST NOT be rewritten.
-- memory: durable facts, decisions, failures, preferences, and outcomes.
+- prompt: supplemental prompt notes only, including stable user preferences. The base system prompt is immutable and MUST NOT be rewritten.
+- memory: durable technical facts, decisions, failures, and outcomes.
 - skill: installed Python REPL skill. Skill create/update edits MUST include a \`reference\` object with \`{"type":"python"}\`, a Python import, and a callable or call pattern; they also MUST include an \`arguments\` object describing accepted inputs, required fields, defaults, and constraints. Use \`{}\` for \`arguments\` only when the Python callable truly needs no external inputs. Include the RLM-native call form \`await <skill_import>(...)\`.
 - subagent: reusable delegation specs, including purpose, instructions, and when to invoke. Include the RLM-native call form: compose a concise task prompt and spawn with \`handle = await rlm("sub-task")\`; admission returns immediately with \`rlm_child_id\`, \`name\`, \`session_dir\`, and \`model\`, never the child's answer. Results arrive only through explicit \`agent_message\` replies or files; children reply with \`await agent_message.send(message, receiver_role="parent")\`. Use \`await rlm.list_subagents()\` to recover direct child handles and \`await agent_message.send(..., receiver_role="child", receiver_name=handle.name)\` for follow-ups. Do not invent wrappers like \`run_subagent(...)\`.
 
 Scope and persistence policy:
 - The default editable continual harness store is local to the current Prime Agent session. Use it for session-specific progress, active task state, current-run coordination notes, temporary blockers, and project facts that should not affect other sessions.
-- A caller may explicitly request global refinement. Global edits must be stable cross-session lessons, durable user preferences, reusable skills/subagents, or tool/environment facts that should affect future sessions.
+- A caller may explicitly request global refinement. Direct global prompt, skill, and subagent creates or updates remain supported; stable user preferences belong in prompt entries. Creating or updating global technical memory requires Evolution Lab verification and promotion.
 - Entry ids in the harness overview may carry a display-only \`local:\` or \`global:\` prefix. Always use the bare id (no prefix) in edits.
 - All edits in one refinement apply only to the requested scope's store. During a local refinement, global entries are read-only context: never propose update or delete edits for them; create a local entry instead when a session-specific override is genuinely needed.
-- Project/workspace-specific lessons may be persisted globally only when the title, path, or content explicitly names the project/workspace and the lesson is likely to be reused in future sessions for that project. Prefer local edits when the lesson only belongs in the current conversation.
-- Use memory for declarative facts and preferences, skill for repeatable procedures exposed as Python calls, prompt for narrow behavioral policy addendums, and subagent for reusable delegation roles.
-- Create or update the smallest relevant component: repeated delegation roles should become subagent specs, repeated procedures should become skills, durable facts/preferences should become memories, and narrow behavioral policies should become prompt addendums.
-- When an edit is persisted, include metadata such as \`{"scope":"local"}\` or \`{"scope":"global"}\` when that helps future review understand the intended blast radius.
+- Use memory for declarative technical facts, skill for repeatable procedures exposed as Python calls, prompt for narrow behavioral policy addendums and stable user preferences, and subagent for reusable delegation roles.
+- Create or update the smallest relevant local component: repeated delegation roles should become subagent specs, repeated procedures should become skills, durable session technical facts should become memories, and narrow session policies or user preferences should become prompt addendums.
+- When a local edit is persisted, include metadata such as \`{"scope":"local"}\` when that helps future review understand the intended blast radius.
+
+Verified evolution policy:
+- Do not create or update global technical memory directly from a trajectory. Return no such edit; the parent must use the \`evolve\` Python skill to create a proof-backed candidate, run replay and shadow evaluation, and promote it.
+- Direct global prompt, skill, and subagent creates and updates remain supported because Evolution Lab does not currently produce those entry kinds. Stable user preferences may be recorded as global prompt entries.
+- Local entries may still record session progress, temporary blockers, current-run coordination, and user preferences because they do not become cross-session knowledge.
+- Never copy an Evolution Lab candidate into active state by hand or label it active in metadata. Only an Evolution Lab promotion may activate it. Never directly delete active Evolution memory; use \`evolve.rollback\`.
 
 Use the trajectory, current continual harness state, and prior refinement history. Prefer
 small evidence-backed edits. If prior refinements caused issues, rollback or
@@ -175,7 +192,7 @@ JSON only with this exact shape:
 const AUTO_REFINE_REVIEW_SYSTEM_PROMPT = `You are Prime Agent's automatic /refine review gate.
 
 Decide whether this checkpoint should run /refine. Auto /refine writes local continual harness state by default, so approve when the trajectory contains evidence useful to this session's future turns.
-Reject one-off noise, unsupported hypotheses, and transient tool outputs. Ask for global refinement only for durable cross-session lessons or explicitly project-qualified lessons likely to be reused in future sessions.
+Reject one-off noise, unsupported hypotheses, and transient tool outputs. Direct global refinement is available for durable prompt entries (including stable user preferences), skills, and subagent specs. Global technical memory must instead use Evolution Lab.
 
 Return JSON only:
 {
@@ -275,7 +292,7 @@ export function getLocalHarnessStateDir(sessionArtifactDir: string | undefined):
 }
 
 export function getHarnessStatePath(harnessStateDir: string = getGlobalHarnessStateDir()): string {
-	return join(harnessStateDir, "harness_state.json");
+	return join(harnessStateDir, HARNESS_STATE_FILE_NAME);
 }
 
 export function loadHarnessState(
@@ -284,20 +301,22 @@ export function loadHarnessState(
 ): HarnessState {
 	const statePath = getHarnessStatePath(harnessStateDir);
 	if (!existsSync(statePath)) {
-		return emptyHarnessState();
+		return trackHarnessBaseline(emptyHarnessState(), null);
 	}
+	let content: string | null = null;
 	let parsed: Partial<HarnessState>;
 	try {
-		const raw = JSON.parse(readFileSync(statePath, "utf8"));
+		content = readFileSync(statePath, "utf8");
+		const raw = JSON.parse(content);
 		// loadHarnessState runs on every system-prompt build and before each /refine, so
 		// a corrupt or unreadable (or non-object) state file must degrade to empty rather
 		// than throw and break the session. The next saveHarnessState rewrites it cleanly.
 		if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-			return emptyHarnessState();
+			return trackHarnessBaseline(emptyHarnessState(), content);
 		}
 		parsed = raw as Partial<HarnessState>;
 	} catch {
-		return emptyHarnessState();
+		return trackHarnessBaseline(emptyHarnessState(), content);
 	}
 	const state = emptyHarnessState();
 	state.schema = typeof parsed.schema === "number" ? parsed.schema : 1;
@@ -320,7 +339,7 @@ export function loadHarnessState(
 	if (Array.isArray(parsed.refinements)) {
 		state.refinements = parsed.refinements;
 	}
-	return state;
+	return trackHarnessBaseline(state, content);
 }
 
 export function mergeHarnessStates(globalState: HarnessState, localState?: HarnessState): HarnessState {
@@ -345,15 +364,35 @@ export function mergeHarnessStates(globalState: HarnessState, localState?: Harne
 export function saveHarnessState(harnessStateDir: string, state: HarnessState): string {
 	const statePath = getHarnessStatePath(harnessStateDir);
 	const tempPath = `${statePath}.${process.pid}.${randomUUID()}.tmp`;
+	const lockPath = join(harnessStateDir, `.${HARNESS_STATE_FILE_NAME}.evolution.lock`);
 	mkdirSync(harnessStateDir, { recursive: true });
+	let release: (() => void) | undefined;
 	try {
+		release = lockSync(statePath, {
+			realpath: false,
+			lockfilePath: lockPath,
+			stale: 300_000,
+			update: 100_000,
+		});
+		if (!harnessStateBaselines.has(state)) {
+			throw new Error("harness state must be loaded before it can be saved");
+		}
+		const expected = harnessStateBaselines.get(state);
+		const currentContent = existsSync(statePath) ? readFileSync(statePath, "utf8") : null;
+		const current = currentContent === null ? null : harnessContentDigest(currentContent);
+		if (current !== expected) {
+			throw new Error("harness state changed before the locked save");
+		}
 		const mode = existsSync(statePath) ? statSync(statePath).mode & 0o777 : 0o600;
-		writeFileSync(tempPath, `${JSON.stringify(state, null, 2)}\n`, { encoding: "utf8", mode });
+		const serialized = `${JSON.stringify(state, null, 2)}\n`;
+		writeFileSync(tempPath, serialized, { encoding: "utf8", mode });
 		renameSync(tempPath, statePath);
+		harnessStateBaselines.set(state, harnessContentDigest(serialized));
 	} finally {
 		if (existsSync(tempPath)) {
 			unlinkSync(tempPath);
 		}
+		release?.();
 	}
 	return statePath;
 }
@@ -447,12 +486,12 @@ export function formatHarnessStateForPrompt(
 		"",
 		"Local continual harness entries belong to this Prime Agent session. Global continual harness entries persist across Prime Agent sessions.",
 		"The continual harness entries below are compact summaries, not full descriptions. Use them as routing/context hints; inspect or refine the underlying continual harness entry only when detail matters.",
-		"Default to local continual harness refinement for current task progress, temporary blockers, and session coordination. Use global continual harness refinement only for stable cross-session lessons, durable user preferences, reusable skills/subagents, or explicitly project-qualified facts.",
+		"Default to local continual harness refinement for current task progress, temporary blockers, and session coordination. Global technical memory creates and updates require Evolution Lab proof, replay, shadow, and promotion; direct global prompt, skill, and subagent CRUD remains supported, including stable user preference prompt entries.",
 		"Use these continual harness prompt notes, memories, skills, and subagent specs when they are relevant. The base system prompt is immutable; prompt entries below are supplemental notes only.",
 		"",
 		includeRefineExamples
-			? "When to call `await refine.run()`: after a repeated failure, a reusable tactic emerges, a repeated delegation role should become a subagent spec, a repeated procedure should become a skill, a durable fact/preference should become a memory, a narrow behavioral policy should become a prompt addendum, a user corrects behavior that should persist locally or globally, validation shows a continual harness entry is wrong, or a skill/subagent/memory/prompt note should be created, updated, deleted, or rolled back. Keep `await refine.run()` continual harness edits small and evidence-backed."
-			: "When to refine the continual harness: after a repeated failure, a reusable tactic emerges, a repeated delegation role should become a subagent spec, a repeated procedure should become a skill, a durable fact/preference should become a memory, a narrow behavioral policy should become a prompt addendum, a user corrects behavior that should persist locally or globally, validation shows a continual harness entry is wrong, or a skill/subagent/memory/prompt note should be created, updated, deleted, or rolled back. Keep continual harness edits small and evidence-backed.",
+			? "When to call `await refine.run()`: after a repeated failure, a reusable tactic emerges, a repeated delegation role should become a subagent spec, a repeated procedure should become a skill, a local task fact or temporary blocker should become session memory, a narrow behavioral policy should become a prompt addendum, a user corrects behavior, validation shows a continual harness entry is wrong, or an entry should be updated, deleted, or rolled back. A reusable technical fact or known error must instead become a proof-backed candidate through `evolve`, replay, shadow, and promotion. Keep `await refine.run()` edits small and evidence-backed."
+			: "When to refine the continual harness: after a repeated failure, a reusable tactic emerges, a repeated delegation role should become a subagent spec, a repeated procedure should become a skill, a local task fact or temporary blocker should become session memory, a narrow behavioral policy should become a prompt addendum, a user corrects behavior, validation shows a continual harness entry is wrong, or an entry should be updated, deleted, or rolled back. A reusable technical fact or known error must instead pass proof-backed candidate, replay, shadow, and promotion gates. Keep continual harness edits small and evidence-backed.",
 		"",
 		includeIpythonExamples
 			? "Call contract: read each installed Python skill's SKILL.md and call its documented module function in IPython; do not assume a `.run` entrypoint. Use `<skill_import> ...` in shell when a CLI exists. Continual harness skill entries are Python REPL skills with an explicit Python `reference` and `arguments` contract. Spawn a continual harness subagent spec by composing a concise task prompt and calling `handle = await rlm('sub-task')`; admission returns immediately with `rlm_child_id`, `name`, `session_dir`, and `model`, never the child's answer. Results arrive only through explicit `agent_message` replies or files; children reply with `await agent_message.send(message, receiver_role='parent')`. Use `await rlm.list_subagents()` to recover direct child handles and `await agent_message.send(..., receiver_role='child', receiver_name=handle.name)` for follow-ups. Do not invent wrappers such as `call_skill(...)`, `run_subagent(...)`, or named subagent registries."
@@ -722,6 +761,35 @@ export function applyRefinementProposal(
 
 		const records = state.entries[edit.kind];
 		const before = cloneEntry(records[id]);
+		const effectiveScope: HarnessScope =
+			options.scope === "global" || before?.scope === "global" ? "global" : "local";
+		if (effectiveScope === "global" && edit.kind === "memory" && edit.action !== "delete") {
+			appliedEdits.push({
+				...edit,
+				id,
+				before,
+				applied: false,
+				error: "global technical memory activation requires Evolution Lab replay and promotion",
+			});
+			continue;
+		}
+		if (
+			effectiveScope === "global" &&
+			edit.action === "delete" &&
+			edit.kind === "memory" &&
+			before !== undefined &&
+			Object.hasOwn(before.metadata, "evolution_candidate_id") &&
+			before.metadata.evolution_status === "active"
+		) {
+			appliedEdits.push({
+				...edit,
+				id,
+				before,
+				applied: false,
+				error: "active Evolution memory cannot be deleted directly; use evolve.rollback",
+			});
+			continue;
+		}
 		const entryKey = `${edit.kind}:${id}`;
 		const baseline = cloneEntry(options.baselineState?.entries[edit.kind][id]);
 		if (
@@ -891,7 +959,7 @@ export async function planRefinement(
 
 	const conversationText = serializeConversation(convertToLlm(messages)).slice(-80_000);
 	const scopeInstruction = options.global
-		? "Requested refinement scope: global. Only propose stable cross-session continual harness edits, durable user preferences, reusable skills/subagents, or explicitly project-qualified facts that should affect future Prime Agent sessions. Do not persist session-only progress, temporary blockers, or current-run coordination globally."
+		? "Requested refinement scope: global. Creating or updating global technical memory is forbidden; use Evolution Lab verification and promotion. Direct global prompt, skill, and subagent CRUD remains supported, including stable user preference prompt entries. Do not directly delete active Evolution memory; use evolve.rollback. Recorded rollback of other global entries is handled separately."
 		: "Requested refinement scope: local. Prefer local continual harness edits for current task progress, temporary blockers, current-run coordination, and project facts that are not clearly reusable across Prime Agent sessions. Global entries in the overview are read-only context: do not propose update or delete edits for them; create a local entry instead if an override is needed.";
 	const userPrompt = [
 		`<current_harness_state>\n${overviewForPrompt(state)}\n</current_harness_state>`,
@@ -971,7 +1039,7 @@ ${historyForPrompt(history)}
 		`<conversation>
 ${conversationText}
 </conversation>`,
-		"Return shouldRefine=true when the trajectory contains evidence useful to this session's future turns. Prefer local harness edits for current task progress, temporary blockers, and current-run coordination. Ask for global refinement only for durable cross-session lessons or explicitly project-qualified facts likely to be reused in future sessions.",
+		"Return shouldRefine=true when the trajectory contains evidence useful to this session's future turns. Prefer local harness edits for current task progress, temporary blockers, and current-run coordination. Direct global refinement is available for durable prompt entries (including stable user preferences), skills, and subagent specs; global technical memory must instead use Evolution Lab.",
 	].join("\n\n");
 	// Auto-refine review requires parseable JSON. Keep it non-reasoning so
 	// reasoning-capable models use final text budget for the JSON object.

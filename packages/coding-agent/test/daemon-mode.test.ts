@@ -14,6 +14,7 @@ import {
 import type { AgentObserveController } from "../src/core/agent-observe.js";
 import type { CreateAgentSessionRuntimeFactory } from "../src/core/agent-session-runtime.js";
 import type { AgentCronJob, AgentCronJobStore } from "../src/core/cron-jobs.js";
+import { normalizeRlmCapabilityManifest, type RlmCapabilityManifest } from "../src/core/rlm-capabilities.js";
 import {
 	type CreateRlmSubagentRuntimeOptions,
 	createDefaultRlmSubagentSessionName,
@@ -730,7 +731,7 @@ describe("daemon mode helpers", () => {
 			if (!parentSessionFile) throw new Error("Missing parent session file");
 			const childSessionDir = join(parentManager.getSessionArtifactDir()!, "child-1");
 			const createRuntime = vi.fn(async (options: Parameters<CreateAgentSessionRuntimeFactory>[0]) => ({
-				session: makeRuntimeSession(options.sessionManager),
+				session: makeRuntimeSession(options.sessionManager, options.sessionOptions?.capabilities),
 				extensionsResult: { extensions: [], errors: [], runtime: {} } as unknown as Awaited<
 					ReturnType<CreateAgentSessionRuntimeFactory>
 				>["extensionsResult"],
@@ -751,8 +752,10 @@ describe("daemon mode helpers", () => {
 					options: CreateRlmSubagentRuntimeOptions,
 				): Promise<ActiveSessionState["runtime"]>;
 				createSubagentRuntimeHost(parentState: ActiveSessionState): SubagentRuntimeHost;
-				listPassiveRlmSubagents(): Promise<Array<{ entry: { childId: string } }>>;
-				findPassiveRlmSubagent(target: string): Promise<{ entry: { childId: string } } | undefined>;
+				listPassiveRlmSubagents(): Promise<Array<{ entry: { childId: string; usageTokens?: number } }>>;
+				findPassiveRlmSubagent(
+					target: string,
+				): Promise<{ entry: { childId: string; usageTokens?: number } } | undefined>;
 				createAgentMessageController(
 					getCurrentState: () => ActiveSessionState | undefined,
 				): AgentSessionMessageController;
@@ -780,6 +783,7 @@ describe("daemon mode helpers", () => {
 				sessionName: "real-worker",
 				sessionDir: childSessionDir,
 				cwd: tempDir,
+				capabilities: normalizeRlmCapabilityManifest(undefined, tempDir),
 				model: { provider: "test", id: "model" } as Model<Api>,
 				thinkingLevel: "off",
 				serviceTier: null,
@@ -797,13 +801,17 @@ describe("daemon mode helpers", () => {
 			);
 			if (!childState?.runtime.session.sessionFile) throw new Error("Missing child state");
 			const host = internals.createSubagentRuntimeHost(parentState);
-			expect(host.completeRlmSubagentRuntime?.("child-1", childRuntime.session)).toBe(true);
+			expect(host.completeRlmSubagentRuntime?.("child-1", childRuntime.session, 23)).toBe(true);
 			await (
 				daemon as unknown as { closeSession(state: ActiveSessionState, reason: "shutdown"): Promise<void> }
 			).closeSession(childState, "shutdown");
 
-			expect((await internals.listPassiveRlmSubagents()).map(({ entry }) => entry.childId)).toContain("child-1");
-			expect((await internals.findPassiveRlmSubagent("real-worker"))?.entry.childId).toBe("child-1");
+			expect((await internals.listPassiveRlmSubagents()).map(({ entry }) => entry)).toContainEqual(
+				expect.objectContaining({ childId: "child-1", usageTokens: 23 }),
+			);
+			expect(await internals.findPassiveRlmSubagent("real-worker")).toMatchObject({
+				entry: { childId: "child-1", usageTokens: 23 },
+			});
 			const roster = await internals.createAgentMessageController(() => parentState).roster?.();
 			const passiveRosterEntry = roster?.entries.find((entry) => entry.name === "real-worker");
 			expect(passiveRosterEntry).toMatchObject({ relationship: "child", status: "inactive" });
@@ -853,7 +861,7 @@ describe("daemon mode helpers", () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "prime-agent-daemon-in-memory-parent-depth-"));
 		try {
 			const createRuntime = vi.fn(async (options: Parameters<CreateAgentSessionRuntimeFactory>[0]) => ({
-				session: makeRuntimeSession(options.sessionManager),
+				session: makeRuntimeSession(options.sessionManager, options.sessionOptions?.capabilities),
 				extensionsResult: { extensions: [], errors: [], runtime: {} } as unknown as Awaited<
 					ReturnType<CreateAgentSessionRuntimeFactory>
 				>["extensionsResult"],
@@ -881,6 +889,7 @@ describe("daemon mode helpers", () => {
 				sessionName: "depth-child",
 				sessionDir: join(tempDir, "child"),
 				cwd: tempDir,
+				capabilities: normalizeRlmCapabilityManifest(undefined, tempDir),
 				model: {} as Model<Api>,
 				thinkingLevel: "off",
 				serviceTier: null,
@@ -927,7 +936,7 @@ describe("daemon mode helpers", () => {
 				},
 			);
 			const createRuntime = vi.fn(async (options: Parameters<CreateAgentSessionRuntimeFactory>[0]) => {
-				const session = makeRuntimeSession(options.sessionManager);
+				const session = makeRuntimeSession(options.sessionManager, options.sessionOptions?.capabilities);
 				Object.assign(session, {
 					isStreaming: false,
 					isCompacting: false,
@@ -976,6 +985,7 @@ describe("daemon mode helpers", () => {
 				sessionName: "heartbeat-child",
 				sessionDir: childSessionDir,
 				cwd: tempDir,
+				capabilities: normalizeRlmCapabilityManifest(undefined, tempDir),
 				model: {} as Model<Api>,
 				thinkingLevel: "off",
 				serviceTier: null,
@@ -4682,7 +4692,7 @@ describe("daemon mode helpers", () => {
 			const createRuntime = vi.fn(async (options: Parameters<CreateAgentSessionRuntimeFactory>[0]) => {
 				await createBarrier;
 				return {
-					session: makeRuntimeSession(options.sessionManager),
+					session: makeRuntimeSession(options.sessionManager, options.sessionOptions?.capabilities),
 					extensionsResult: { extensions: [], errors: [], runtime: {} } as unknown as Awaited<
 						ReturnType<CreateAgentSessionRuntimeFactory>
 					>["extensionsResult"],
@@ -4725,7 +4735,7 @@ describe("daemon mode helpers", () => {
 			const sessionPath = join(tempDir, "session.jsonl");
 			const createRuntime = vi.fn(async (options: Parameters<CreateAgentSessionRuntimeFactory>[0]) => {
 				return {
-					session: makeRuntimeSession(options.sessionManager),
+					session: makeRuntimeSession(options.sessionManager, options.sessionOptions?.capabilities),
 					extensionsResult: { extensions: [], errors: [], runtime: {} } as unknown as Awaited<
 						ReturnType<CreateAgentSessionRuntimeFactory>
 					>["extensionsResult"],
@@ -4771,7 +4781,7 @@ describe("daemon mode helpers", () => {
 		try {
 			let listedAgentsDuringBind = 0;
 			const createRuntime = vi.fn(async (options: Parameters<CreateAgentSessionRuntimeFactory>[0]) => {
-				const session = makeRuntimeSession(options.sessionManager);
+				const session = makeRuntimeSession(options.sessionManager, options.sessionOptions?.capabilities);
 				session.bindExtensions = vi.fn(async () => {
 					const controller = options.sessionOptions?.agentMessageController;
 					const result = await controller?.listAgents();
@@ -4846,6 +4856,7 @@ describe("daemon mode helpers", () => {
 					rlmDepth: 1,
 					rlmMaxDepth: 4,
 					rlmParentNodeId: childId,
+					capabilities: normalizeRlmCapabilityManifest(undefined, tempDir),
 					status: "completed",
 					createdAt: 1,
 					updatedAt: "2026-01-01T00:00:00.000Z",
@@ -4853,7 +4864,7 @@ describe("daemon mode helpers", () => {
 			);
 
 			const createRuntime = vi.fn(async (options: Parameters<CreateAgentSessionRuntimeFactory>[0]) => ({
-				session: makeRuntimeSession(options.sessionManager),
+				session: makeRuntimeSession(options.sessionManager, options.sessionOptions?.capabilities),
 				extensionsResult: { extensions: [], errors: [], runtime: {} } as unknown as Awaited<
 					ReturnType<CreateAgentSessionRuntimeFactory>
 				>["extensionsResult"],
@@ -4967,7 +4978,7 @@ describe("daemon mode helpers", () => {
 				throw new Error("Missing session file");
 			}
 			const createRuntime = vi.fn(async (options: Parameters<CreateAgentSessionRuntimeFactory>[0]) => ({
-				session: makeRuntimeSession(options.sessionManager),
+				session: makeRuntimeSession(options.sessionManager, options.sessionOptions?.capabilities),
 				extensionsResult: { extensions: [], errors: [], runtime: {} } as unknown as Awaited<
 					ReturnType<CreateAgentSessionRuntimeFactory>
 				>["extensionsResult"],
@@ -5626,6 +5637,7 @@ describe("daemon mode helpers", () => {
 					sessionFile: siblingSessionFile,
 					parentSessionId: fixture.parentSessionId,
 					parentSessionFile: fixture.parentSessionFile,
+					capabilities: normalizeRlmCapabilityManifest(undefined, tempDir),
 					status: "completed",
 					createdAt: 2,
 					updatedAt: "2026-01-01T00:00:01.000Z",
@@ -7268,7 +7280,7 @@ describe("daemon mode helpers", () => {
 		try {
 			const sessionNamesDuringBind: Array<string | undefined> = [];
 			const createRuntime = vi.fn(async (options: Parameters<CreateAgentSessionRuntimeFactory>[0]) => {
-				const session = makeRuntimeSession(options.sessionManager);
+				const session = makeRuntimeSession(options.sessionManager, options.sessionOptions?.capabilities);
 				session.bindExtensions = vi.fn(async () => {
 					sessionNamesDuringBind.push(options.sessionManager.getSessionName());
 				});
@@ -7309,6 +7321,7 @@ describe("daemon mode helpers", () => {
 				sessionName: childSessionName,
 				sessionDir: join(tempDir, "child"),
 				cwd: tempDir,
+				capabilities: normalizeRlmCapabilityManifest(undefined, tempDir),
 				model: {} as Model<Api>,
 				thinkingLevel: "off",
 				serviceTier: null,
@@ -7370,6 +7383,7 @@ describe("daemon mode helpers", () => {
 					sessionName: "cancelled-worker",
 					sessionDir: join(tempDir, "cancelled-child"),
 					cwd: tempDir,
+					capabilities: normalizeRlmCapabilityManifest(undefined, tempDir),
 					model: {} as Model<Api>,
 					thinkingLevel: "off",
 					serviceTier: null,
@@ -7394,7 +7408,7 @@ describe("daemon mode helpers", () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "prime-agent-daemon-root-name-failure-"));
 		try {
 			const createRuntime = vi.fn(async (options: Parameters<CreateAgentSessionRuntimeFactory>[0]) => ({
-				session: makeRuntimeSession(options.sessionManager),
+				session: makeRuntimeSession(options.sessionManager, options.sessionOptions?.capabilities),
 				extensionsResult: { extensions: [], errors: [], runtime: {} } as never,
 				services: { cwd: options.cwd, agentDir: options.agentDir } as never,
 				diagnostics: [],
@@ -7425,7 +7439,7 @@ describe("daemon mode helpers", () => {
 		try {
 			let failingChildSession: ReturnType<typeof makeRuntimeSession> | undefined;
 			const createRuntime = vi.fn(async (options: Parameters<CreateAgentSessionRuntimeFactory>[0]) => {
-				const session = makeRuntimeSession(options.sessionManager);
+				const session = makeRuntimeSession(options.sessionManager, options.sessionOptions?.capabilities);
 				if (createRuntime.mock.calls.length > 1) {
 					failingChildSession = session;
 					session.setSessionName = vi.fn(() => {
@@ -7467,6 +7481,7 @@ describe("daemon mode helpers", () => {
 					sessionName: "requested-name",
 					sessionDir: join(tempDir, "child"),
 					cwd: tempDir,
+					capabilities: normalizeRlmCapabilityManifest(undefined, tempDir),
 					model: {} as Model<Api>,
 					thinkingLevel: "off",
 					serviceTier: null,
@@ -7497,7 +7512,7 @@ describe("daemon mode helpers", () => {
 				releaseBind = resolve;
 			});
 			const createRuntime = vi.fn(async (options: Parameters<CreateAgentSessionRuntimeFactory>[0]) => {
-				const session = makeRuntimeSession(options.sessionManager);
+				const session = makeRuntimeSession(options.sessionManager, options.sessionOptions?.capabilities);
 				session.prompt = vi.fn(async () => {});
 				session.bindExtensions = vi.fn(async () => {
 					await bindBarrier;
@@ -9703,6 +9718,7 @@ function makePersistedRlmDaemonFixture(
 			rlmDepth: 2,
 			rlmMaxDepth: 4,
 			rlmParentNodeId: grandchildId,
+			capabilities: normalizeRlmCapabilityManifest(undefined, tempDir),
 			status: "completed",
 			createdAt: 2,
 			updatedAt: "2026-01-01T00:00:01.000Z",
@@ -9722,6 +9738,7 @@ function makePersistedRlmDaemonFixture(
 			rlmDepth: 1,
 			rlmMaxDepth: 4,
 			rlmParentNodeId: childId,
+			capabilities: normalizeRlmCapabilityManifest(undefined, tempDir),
 			status: "completed",
 			createdAt: 1,
 			updatedAt: "2026-01-01T00:00:00.000Z",
@@ -9751,7 +9768,10 @@ function makePersistedRlmDaemonFixture(
 			options.grandchildRuntimeStarted?.();
 			await options.grandchildRuntimeGate;
 		}
-		const runtimeSession = makeRuntimeSession(runtimeOptions.sessionManager);
+		const runtimeSession = makeRuntimeSession(
+			runtimeOptions.sessionManager,
+			runtimeOptions.sessionOptions?.capabilities,
+		);
 		runtimeSessions.push(runtimeSession);
 		if (isChild && options.childBindingGate) {
 			runtimeSession.bindExtensions = vi.fn(async () => {
@@ -9809,9 +9829,11 @@ function makePersistedRlmDaemonFixture(
 
 function makeRuntimeSession(
 	sessionManager: Parameters<CreateAgentSessionRuntimeFactory>[0]["sessionManager"],
+	capabilities?: RlmCapabilityManifest,
 ): Awaited<ReturnType<CreateAgentSessionRuntimeFactory>>["session"] {
 	return {
 		sessionManager,
+		capabilities,
 		messages: [],
 		extensionRunner: {
 			hasHandlers: vi.fn(() => false),
