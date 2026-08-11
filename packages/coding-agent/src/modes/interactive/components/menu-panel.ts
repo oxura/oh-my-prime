@@ -247,7 +247,12 @@ export class MenuPanel extends Container {
 		const hasSubtitle = subtitle !== undefined && subtitle.length > 0;
 		const hasHeader = hasTitle || hasSubtitle;
 		if (hasTitle) {
-			lines.push(surfaceLine(theme.bold(theme.fg("text", this.title)), safeWidth));
+			lines.push(
+				surfaceLine(
+					`${theme.fg("accent", "◆")} ${theme.bold(theme.fg("text", this.title.toUpperCase()))}`,
+					safeWidth,
+				),
+			);
 		}
 		if (hasSubtitle) {
 			lines.push(...surfaceWrappedLines(theme.fg("muted", subtitle), safeWidth));
@@ -368,7 +373,13 @@ export class MenuRow implements Component, FullWidthMenuComponent {
 		const lines: string[] = [];
 		lines.push(this.rowLine(primaryLine, safeWidth, this.selected));
 		if (secondary) {
-			lines.push(this.rowLine(truncateToWidth(secondary, innerWidth, "", true), safeWidth, this.selected));
+			lines.push(
+				this.rowLine(
+					`  ${truncateToWidth(secondary, Math.max(1, innerWidth - 2), "", true)}`,
+					safeWidth,
+					this.selected,
+				),
+			);
 		}
 		return lines;
 	}

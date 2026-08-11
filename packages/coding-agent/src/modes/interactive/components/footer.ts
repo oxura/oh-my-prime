@@ -1,42 +1,50 @@
-import type { Component } from "@earendil-works/pi-tui";
+import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.js";
+import { theme } from "../theme/theme.js";
 
 /**
- * Footer component for the prime brand TUI.
- *
- * Renders nothing by default — token counters, cost, model name, cwd, and context %
- * are intentionally hidden. The setters and invalidate/dispose hooks are kept so the
- * existing call sites in interactive-mode keep working without modification, and so
- * `/usage` can expose telemetry without re-plumbing.
+ * Low-noise workspace footer. The prompt tray carries live model and context
+ * state; this row keeps durable environment state visible without competing
+ * with the conversation.
  */
 export class FooterComponent implements Component {
-	constructor(private footerData: ReadonlyFooterDataProvider) {
-		void this.footerData;
+	private autoCompactEnabled = false;
+
+	constructor(private readonly footerData: ReadonlyFooterDataProvider) {}
+
+	setAutoCompactEnabled(enabled: boolean): void {
+		this.autoCompactEnabled = enabled;
 	}
 
-	setAutoCompactEnabled(_enabled: boolean): void {
-		// no-op while the footer is empty
-	}
-
-	/**
-	 * No-op: git branch caching now handled by provider.
-	 * Kept for compatibility with existing call sites in interactive-mode.
-	 */
 	invalidate(): void {
-		// No-op: git branch is cached/invalidated by provider
+		// Render output is read directly from the provider.
 	}
 
-	/**
-	 * Clean up resources.
-	 * Git watcher cleanup now handled by provider.
-	 */
 	dispose(): void {
-		// Git watcher cleanup handled by provider
+		// Watcher ownership remains with FooterDataProvider.
 	}
 
-	render(_width: number): string[] {
-		// Footer is intentionally empty in the prime brand TUI. Telemetry (cost, tokens, model,
-		// cwd, context %) is hidden by default; bring it back via /usage when needed.
-		return [];
+	render(width: number): string[] {
+		const safeWidth = Math.max(1, width);
+		const branch = this.footerData.getGitBranch();
+		const providerCount = this.footerData.getAvailableProviderCount();
+		const extensionStatuses = [...this.footerData.getExtensionStatuses().values()].filter((status) => status.trim());
+		const leftParts = [
+			branch ? `${theme.fg("dim", "BRANCH")} ${theme.fg("muted", branch)}` : undefined,
+			this.autoCompactEnabled ? `${theme.fg("dim", "COMPACT")} ${theme.fg("success", "AUTO")}` : undefined,
+			...extensionStatuses.map((status) => theme.fg("muted", status)),
+		].filter((part): part is string => part !== undefined);
+		const left = leftParts.join(theme.fg("borderMuted", "  ·  "));
+		const right =
+			providerCount > 0 ? `${theme.fg("dim", "PROVIDERS")} ${theme.fg("muted", providerCount.toString())}` : "";
+		if (!left && !right) return [];
+
+		const gap = left && right ? 2 : 0;
+		const rightWidth = Math.min(visibleWidth(right), Math.max(0, safeWidth - gap));
+		const leftWidth = Math.max(0, safeWidth - rightWidth - gap);
+		const renderedLeft = truncateToWidth(left, leftWidth, "…", true);
+		const renderedRight = truncateToWidth(right, rightWidth, "…", true);
+		const padding = " ".repeat(Math.max(0, safeWidth - visibleWidth(renderedLeft) - visibleWidth(renderedRight)));
+		return [theme.fg("dim", `${renderedLeft}${padding}${renderedRight}`)];
 	}
 }

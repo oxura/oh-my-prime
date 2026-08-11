@@ -205,6 +205,7 @@ export class AssistantMessageComponent extends Container {
 
 		if (hasVisibleContent) {
 			this.contentContainer.addChild(new Spacer(1));
+			this.contentContainer.addChild(new Text(theme.bold(theme.fg("accent", "OH MY PRIME")), 1, 0));
 		}
 
 		// Render content in order

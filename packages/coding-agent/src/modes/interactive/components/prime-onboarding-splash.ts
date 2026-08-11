@@ -12,9 +12,9 @@ interface PrimeOnboardingSplashOptions {
 const LOGO_LINES = PRIME_BUTTERFLY_LOGO.split("\n");
 const LOGO_WIDTH = LOGO_LINES.reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
 const ANIMATION_INTERVAL_MS = 120;
-const LAB_FIELD_HEIGHT = 14;
+const LAB_FIELD_HEIGHT = 12;
 const LAB_FIELD_MIN_WIDTH = 42;
-const LAB_FIELD_MAX_WIDTH = 78;
+const LAB_FIELD_MAX_WIDTH = 72;
 
 type SplashTone = Extract<ThemeColor, "accent" | "borderMuted" | "dim" | "mdLink" | "muted" | "text" | "warning">;
 
@@ -115,7 +115,7 @@ export class PrimeOnboardingSplashComponent implements Component {
 		if (this.progressMessage) {
 			return [{ text: this.progressMessage, tone: "muted" }];
 		}
-		const actionLabel = this.options.continueActionLabel ?? "login with Prime Intellect";
+		const actionLabel = this.options.continueActionLabel ?? "connect a model";
 		return [
 			{ text: "Press ", tone: "muted" },
 			{ text: "Enter", tone: "accent", bold: true },
@@ -124,11 +124,11 @@ export class PrimeOnboardingSplashComponent implements Component {
 	}
 
 	private formatBrandLine(): PanelTextLine {
-		return [
-			{ text: "Welcome to ", tone: "text" },
-			{ text: "PRIME", tone: "text", bold: true },
-			{ text: " Agent", tone: "text", italic: true },
-		];
+		return [{ text: "OH MY PRIME", tone: "accent", bold: true }];
+	}
+
+	private formatTaglineLine(): PanelTextLine {
+		return [{ text: "VERIFIED RECURSIVE AGENT RUNTIME", tone: "muted" }];
 	}
 
 	private renderPanel(width: number): PanelLine[] {
@@ -139,8 +139,9 @@ export class PrimeOnboardingSplashComponent implements Component {
 		}
 		lines.push({ left: 0, parts: [] });
 		lines.push({ left: 0, parts: [] });
-		lines.push({ left: 0, parts: [] });
 		lines.push(this.centerParts(this.formatBrandLine(), width));
+		lines.push(this.centerParts(this.formatTaglineLine(), width));
+		lines.push({ left: 0, parts: [] });
 		lines.push(this.centerParts(this.formatContinueHint(), width));
 
 		return lines;
@@ -150,7 +151,7 @@ export class PrimeOnboardingSplashComponent implements Component {
 		const logoWidth = Math.min(LOGO_WIDTH, width);
 		return LOGO_LINES.map((line) => {
 			const paddedLine = line + " ".repeat(Math.max(0, LOGO_WIDTH - visibleWidth(line)));
-			return [{ text: truncateToWidth(paddedLine, logoWidth, ""), tone: "text", transparentSpaces: true }];
+			return [{ text: truncateToWidth(paddedLine, logoWidth, ""), tone: "accent", transparentSpaces: true }];
 		});
 	}
 
@@ -182,7 +183,7 @@ export class PrimeOnboardingSplashComponent implements Component {
 				if (!cell) {
 					continue;
 				}
-				if (cell.tone === "mdLink" && this.isInsideQuietZone(x, y, quietZone)) {
+				if (this.isInsideQuietZone(x, y, quietZone)) {
 					continue;
 				}
 				this.put(canvas, x, y, cell.char, cell.tone, cell.priority);
@@ -191,70 +192,24 @@ export class PrimeOnboardingSplashComponent implements Component {
 	}
 
 	private labCell(x: number, y: number, width: number): SplashCell | undefined {
-		const height = LAB_FIELD_HEIGHT;
-		const frame = this.frame;
-		let cell: SplashCell | undefined;
-		const setCell = (char: string, tone: SplashTone, priority: number) => {
-			if (!cell || priority >= cell.priority) {
-				cell = { char, tone, priority };
-			}
-		};
-
-		const hash = this.mod(x * 37 + y * 53 + frame * 11 + x * y * 3, 101);
-		if (hash < 3) {
-			setCell("·", "dim", 1);
+		const frame = Math.floor(this.frame / 2);
+		const sparsePoint = this.mod(x * 43 + y * 71 + frame * 3, 149);
+		if (sparsePoint === 0) {
+			return { char: "·", tone: "dim", priority: 1 };
 		}
 
-		const centerX = Math.floor((width * 36) / 100);
-		const centerY = Math.floor((height * 54) / 100);
-		const contour = Math.abs(x - centerX) + Math.abs(y - centerY) * 4 + Math.floor(x / 6) - frame;
-		if (x < Math.floor((width * 82) / 100) && this.mod(contour, 24) === 12) {
-			setCell((x + y) % 5 === 0 ? "╌" : "·", "borderMuted", 2);
+		const centerY = Math.floor(LAB_FIELD_HEIGHT / 2);
+		const phase = this.mod(x + frame, 18);
+		const traceY = centerY + (phase < 6 ? 0 : phase < 9 ? -1 : phase < 15 ? 0 : 1);
+		if (y !== traceY || x % 3 !== 0) {
+			return undefined;
 		}
 
-		const horizonY = Math.floor((height * 58) / 100);
-		if (y === horizonY && x % 2 === 0 && this.mod(x + frame, 13) < 2) {
-			setCell("─", x > Math.floor((width * 60) / 100) ? "accent" : "dim", 3);
+		const markerX = this.mod(frame * 2, width);
+		if (Math.abs(x - markerX) <= 1) {
+			return { char: "◆", tone: "accent", priority: 3 };
 		}
-
-		const scanStart = Math.max(0, Math.floor(width / 2) - 5);
-		if (x >= scanStart) {
-			const scanOffset = x - scanStart;
-			if (scanOffset % 4 === 0) {
-				const scanIndex = Math.floor(scanOffset / 4);
-				const segment = this.mod(y + scanIndex * 2 + Math.floor(frame / 2), 6);
-				if (y > 0 && y < height - 1 && segment < 2) {
-					setCell((scanIndex + y) % 4 === 0 ? "┃" : "╎", "mdLink", 4);
-				}
-			}
-		}
-
-		for (let traceIndex = 0; traceIndex < 3; traceIndex++) {
-			const base =
-				traceIndex === 0
-					? Math.floor((height * 30) / 100)
-					: traceIndex === 1
-						? Math.floor((height * 49) / 100)
-						: Math.floor((height * 72) / 100);
-			let wave = this.mod(x * 2 + frame + traceIndex * 7, 16);
-			if (wave > 7) {
-				wave = 15 - wave;
-			}
-			const traceY = base + Math.trunc((wave - 3) / 2);
-			if (y !== traceY) {
-				continue;
-			}
-
-			if (this.mod(x + frame + traceIndex * 13, 41) === 0) {
-				setCell("◆", "warning", 5);
-			} else if (this.mod(x + frame, 12) === 0) {
-				setCell("•", "accent", 5);
-			} else {
-				setCell("·", "accent", 3);
-			}
-		}
-
-		return cell;
+		return { char: "·", tone: "borderMuted", priority: 2 };
 	}
 
 	private isInsideQuietZone(x: number, y: number, quietZone: QuietZone | undefined): boolean {

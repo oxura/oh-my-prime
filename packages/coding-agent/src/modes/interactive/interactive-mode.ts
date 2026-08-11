@@ -406,7 +406,7 @@ export interface BrandSplashHeaderOptions {
 export class BrandSplashHeader implements Component {
 	private readonly logoRaw: string[];
 	private readonly logoCanvasWidth: number;
-	private readonly gutter = 4;
+	private readonly gutter = 5;
 	private readonly labelWidth = 9;
 
 	constructor(
@@ -426,51 +426,69 @@ export class BrandSplashHeader implements Component {
 
 	render(width: number): string[] {
 		const safeWidth = Math.max(1, width);
-		const paddingX = safeWidth > 1 ? 1 : 0;
+		const paddingX = safeWidth >= 48 ? 2 : safeWidth > 1 ? 1 : 0;
 		const contentWidth = Math.max(1, safeWidth - paddingX * 2);
-		const metaWidth = contentWidth - this.logoCanvasWidth - this.gutter;
-		const showMeta = metaWidth >= this.labelWidth + 8;
-		const valueWidth = Math.max(1, metaWidth - this.labelWidth);
-		const labelled = (label: string, value: string) => {
-			const displayValue =
-				label === "cwd" ? truncatePathMiddle(value, valueWidth) : truncateToWidth(value, valueWidth);
-			return theme.fg("dim", label.padEnd(this.labelWidth)) + theme.fg("muted", displayValue);
-		};
+		const showLogo = contentWidth >= this.logoCanvasWidth + this.gutter + 30;
+		const detailWidth = showLogo ? contentWidth - this.logoCanvasWidth - this.gutter : contentWidth;
+		const valueWidth = Math.max(1, detailWidth - this.labelWidth);
+		const tagline =
+			detailWidth >= visibleWidth("VERIFIED RECURSIVE AGENT RUNTIME")
+				? "VERIFIED RECURSIVE AGENT RUNTIME"
+				: "VERIFIED AGENT RUNTIME";
 		const extraMetadata = this.options.getExtraMetadata?.() ?? [];
 		const hideStartHint = this.options.getHideStartHint?.() ?? false;
-		const startHint = this.options.getStartHint?.() ?? "type to start";
-		const metaLines = showMeta
-			? [
-					labelled("version", `v${this.version}`),
-					labelled("model", this.getModelId() ?? "—"),
-					labelled("cwd", formatSplashCwd(this.getCwd())),
-					...extraMetadata.map((line) => labelled(line.label, line.value)),
-					...(hideStartHint ? [] : ["", theme.fg("dim", startHint)]),
-				]
-			: [];
-		const metaStart = Math.max(0, Math.floor((this.logoRaw.length - metaLines.length) / 2));
+		const startHint = this.options.getStartHint?.() ?? "Type a request to begin";
+		const labelled = (label: string, value: string): string => {
+			const displayValue =
+				label === "cwd" ? truncatePathMiddle(value, valueWidth) : truncateToWidth(value, valueWidth, "…");
+			return theme.fg("dim", label.padEnd(this.labelWidth)) + theme.fg("muted", displayValue);
+		};
+		const details = [
+			theme.bold(theme.fg("accent", "OH MY PRIME")),
+			theme.fg("dim", tagline),
+			"",
+			labelled("version", `v${this.version}`),
+			labelled("model", this.getModelId() ?? "not selected"),
+			labelled("cwd", formatSplashCwd(this.getCwd())),
+			...extraMetadata.map((line) => labelled(line.label.toUpperCase(), line.value)),
+			...(hideStartHint || detailWidth < 36
+				? []
+				: [
+						"",
+						theme.fg("borderMuted", "─".repeat(Math.max(1, Math.min(detailWidth, 28)))),
+						`${theme.fg("accent", "›")} ${theme.fg("muted", startHint)}`,
+					]),
+		];
+		const padLine = (content: string): string => {
+			const clipped = truncateToWidth(content, contentWidth, "");
+			return " ".repeat(paddingX) + clipped + " ".repeat(Math.max(0, safeWidth - paddingX - visibleWidth(clipped)));
+		};
 		const lines = this.options.topPadding ? [""] : [];
-		lines.push(
-			...this.logoRaw.map((line, index) => {
-				const colored = theme.fg("text", line);
-				const meta = index >= metaStart && index < metaStart + metaLines.length ? metaLines[index - metaStart] : "";
-				const padding = showMeta
-					? " ".repeat(Math.max(0, this.logoCanvasWidth - visibleWidth(line) + this.gutter))
-					: "";
-				const content = truncateToWidth(colored + padding + meta, contentWidth, "");
-				return (
-					" ".repeat(paddingX) + content + " ".repeat(Math.max(0, safeWidth - paddingX - visibleWidth(content)))
-				);
-			}),
-		);
+
+		if (showLogo) {
+			const rows = Math.max(this.logoRaw.length, details.length);
+			const logoStart = Math.max(0, Math.floor((rows - this.logoRaw.length) / 2));
+			const detailStart = Math.max(0, Math.floor((rows - details.length) / 2));
+			for (let index = 0; index < rows; index++) {
+				const logo =
+					index >= logoStart && index < logoStart + this.logoRaw.length
+						? (this.logoRaw[index - logoStart] ?? "")
+						: "";
+				const detail =
+					index >= detailStart && index < detailStart + details.length ? (details[index - detailStart] ?? "") : "";
+				const logoCell =
+					theme.fg("accent", logo) +
+					" ".repeat(Math.max(0, this.logoCanvasWidth - visibleWidth(logo) + this.gutter));
+				lines.push(padLine(logoCell + detail));
+			}
+		} else {
+			lines.push(...details.map(padLine));
+		}
 
 		if (this.verboseInstructions) {
 			lines.push(" ".repeat(safeWidth));
 			for (const instruction of this.verboseInstructions.split("\n")) {
-				const content = truncateToWidth(instruction, contentWidth);
-				lines.push(
-					" ".repeat(paddingX) + content + " ".repeat(Math.max(0, safeWidth - paddingX - visibleWidth(content))),
-				);
+				lines.push(padLine(`${theme.fg("accent", "│")} ${theme.fg("muted", instruction)}`));
 			}
 		}
 
@@ -1089,6 +1107,7 @@ export class InteractiveMode {
 			isArgumentCommand: builtinSlashCommandTakesArgument,
 			placeholder: this.startHint,
 			placeholderColor: (text) => theme.fg("dim", text),
+			promptPrefix: "› ",
 		});
 		this.editor = this.defaultEditor;
 		this.mainContainer = new Container();
@@ -6146,18 +6165,23 @@ export class InteractiveMode {
 		const secondLast = children.length > 1 ? children[children.length - 2] : undefined;
 
 		if (last && secondLast && last === this.lastStatusText && secondLast === this.lastStatusSpacer) {
-			this.lastStatusText.setText(theme.fg(tone, message));
+			this.lastStatusText.setText(this.formatNotice("STATUS", message, tone));
 			this.ui.requestRender();
 			return;
 		}
 
 		const spacer = new Spacer(1);
-		const text = new Text(theme.fg(tone, message), 1, 0);
+		const text = new Text(this.formatNotice("STATUS", message, tone), 1, 0);
 		this.chatContainer.addChild(spacer);
 		this.chatContainer.addChild(text);
 		this.lastStatusSpacer = spacer;
 		this.lastStatusText = text;
 		this.ui.requestRender();
+	}
+
+	private formatNotice(label: string, message: string, tone: "dim" | "warning" | "error"): string {
+		const marker = tone === "error" ? "✕" : tone === "warning" ? "▲" : "◆";
+		return `${theme.fg(tone, marker)} ${theme.bold(theme.fg(tone, label))}  ${theme.fg("muted", message)}`;
 	}
 
 	private async copyFullscreenSelection(text: string): Promise<void> {
@@ -7093,13 +7117,13 @@ export class InteractiveMode {
 
 	showError(errorMessage: string): void {
 		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new Text(theme.fg("error", `Error: ${errorMessage}`), 1, 0));
+		this.chatContainer.addChild(new Text(this.formatNotice("ERROR", errorMessage, "error"), 1, 0));
 		this.ui.requestRender();
 	}
 
 	showWarning(warningMessage: string): void {
 		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new Text(theme.fg("warning", `⚠ ${warningMessage}`), 1, 0));
+		this.chatContainer.addChild(new Text(this.formatNotice("WARNING", warningMessage, "warning"), 1, 0));
 		this.ui.requestRender();
 	}
 

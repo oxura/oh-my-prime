@@ -19,7 +19,7 @@ describe("PrimeOnboardingSplashComponent", () => {
 		vi.useRealTimers();
 	});
 
-	it("renders a minimal first-run login action", () => {
+	it("renders a minimal first-run model connection action", () => {
 		const component = new PrimeOnboardingSplashComponent(
 			() => {},
 			() => {},
@@ -29,8 +29,9 @@ describe("PrimeOnboardingSplashComponent", () => {
 		const output = stripAnsi(lines.join("\n"));
 
 		expect(lines).toHaveLength(36);
-		expect(output).toContain("Welcome to PRIME Agent");
-		expect(output).toContain("Press Enter to login with Prime Intellect");
+		expect(output).toContain("OH MY PRIME");
+		expect(output).toContain("VERIFIED RECURSIVE AGENT RUNTIME");
+		expect(output).toContain("Press Enter to connect a model");
 		expect(output).toContain("·");
 		expect(output).not.toContain("prime agent");
 		expect(output).not.toContain("Research and infrastructure assistant for high-context work.");
@@ -88,7 +89,7 @@ describe("PrimeOnboardingSplashComponent", () => {
 		const output = stripAnsi(component.render(100).join("\n"));
 
 		expect(output).toContain("Press Enter to choose a model");
-		expect(output).not.toContain("Press Enter to login with Prime Intellect");
+		expect(output).not.toContain("Press Enter to connect a model");
 	});
 
 	it("shows progress and ignores input while onboarding advances", () => {
@@ -129,8 +130,8 @@ describe("PrimeOnboardingSplashComponent", () => {
 
 		expect(renderRequests).toBe(3);
 		expect(secondRender).not.toBe(firstRender);
-		expect(secondRender).toContain("Welcome to PRIME Agent");
-		expect(secondRender).toContain("Press Enter to login with Prime Intellect");
+		expect(secondRender).toContain("OH MY PRIME");
+		expect(secondRender).toContain("Press Enter to connect a model");
 	});
 
 	it("centers stacked content in narrow terminals", () => {
@@ -141,8 +142,8 @@ describe("PrimeOnboardingSplashComponent", () => {
 		);
 		const rendered = component.render(60).map((line) => stripAnsi(line));
 		const logoLine = rendered.find((line) => line.includes(PRIME_BUTTERFLY_LOGO.split("\n")[0].trim()));
-		const brandLine = rendered.find((line) => line.includes("Welcome to PRIME Agent"));
-		const hintLine = rendered.find((line) => line.includes("Press Enter to login with Prime Intellect"));
+		const brandLine = rendered.find((line) => line.includes("OH MY PRIME"));
+		const hintLine = rendered.find((line) => line.includes("Press Enter to connect a model"));
 
 		expect(logoLine?.search(/\S/)).toBeGreaterThan(0);
 		expect(brandLine?.search(/\S/)).toBeGreaterThan(0);

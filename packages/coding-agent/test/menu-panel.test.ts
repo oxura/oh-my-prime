@@ -32,7 +32,7 @@ describe("MenuPanel", () => {
 		const lines = panel.render(24);
 		const output = stripAnsi(lines.join("\n"));
 
-		expect(output).toContain("Menu");
+		expect(output).toContain("MENU");
 		expect(output).toContain("Pick one.");
 		expect(output).toContain("first");
 		expect(output).toContain("second");

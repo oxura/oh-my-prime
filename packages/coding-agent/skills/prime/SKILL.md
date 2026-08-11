@@ -1,6 +1,6 @@
 ---
 name: prime
-description: Run ProofTree speculative exploration: fork independent Git workspaces, assign deliberately different implementation strategies to recursive agents, apply one acceptance contract to every branch, select only a fully verified candidate, and promote its exact attested patch. Use for risky bugs, ambiguous implementations, concurrency work, and any task where one trajectory is not trustworthy enough.
+description: "Run ProofTree speculative exploration: fork independent Git workspaces, assign deliberately different implementation strategies to recursive agents, apply one acceptance contract to every branch, select only a fully verified candidate, and promote its exact attested patch. Use for risky bugs, ambiguous implementations, concurrency work, and any task where one trajectory is not trustworthy enough."
 ---
 
 # ProofTree

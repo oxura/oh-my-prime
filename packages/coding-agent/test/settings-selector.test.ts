@@ -72,6 +72,8 @@ describe("SettingsSelectorComponent", () => {
 			const component = new SettingsSelectorComponent(config, callbacks);
 			const rendered = stripAnsi(component.render(120).join("\n"));
 
+			expect(rendered).toContain("SETTINGS");
+			expect(rendered).toContain("Runtime, interface, and verification preferences.");
 			expect(rendered).toContain("Show image metadata");
 			expect(rendered).toContain("Auto-resize images");
 			for (const character of "idle") component.getSettingsList().handleInput(character);

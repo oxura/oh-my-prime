@@ -36,6 +36,7 @@ describe("AssistantMessageComponent", () => {
 		const lines = component.render(40);
 
 		expect(lines).not.toHaveLength(0);
+		expect(stripAnsi(lines.join("\n"))).toContain("OH MY PRIME");
 		expect(lines[0]).toContain(OSC133_ZONE_START);
 		expect(lines[lines.length - 1].startsWith(OSC133_ZONE_END + OSC133_ZONE_FINAL)).toBe(true);
 	});

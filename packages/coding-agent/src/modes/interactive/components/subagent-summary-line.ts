@@ -83,13 +83,13 @@ export class SubagentSummaryLine implements Component, Focusable {
 	render(width: number): string[] {
 		const lines = this.renderInfoLine(width);
 		if (this.counts.total === 0) return lines;
-		const summary = `${this.counts.total} subagent${this.counts.total === 1 ? "" : "s"}: ${this.counts.running} running · ${this.counts.idle} idle · ${this.counts.inactive} inactive`;
-		const openHint = this.openable
-			? `  ${keyText("tui.select.confirm")} or ${keyText("app.agents.open")} to open`
-			: "";
-		const text = `${this.focused ? "▸" : " "} ${summary}${openHint}`;
+		const noun = this.counts.total === 1 ? "subagent" : "subagents";
+		const summary = `${this.counts.total} ${noun}: ${this.counts.running} running · ${this.counts.idle} idle · ${this.counts.inactive} inactive`;
+		const openHint = this.openable ? `  ${keyText("tui.select.confirm")} open` : "";
+		const text = `${this.focused ? "›" : " "} ${theme.bold(theme.fg("accent", "AGENTS"))}  ${summary}${openHint}`;
 		const line = truncateToWidth(text, width, "…");
-		lines.push(this.focused ? theme.bg("selectedBg", line.padEnd(width)) : theme.fg("dim", line));
+		const padded = line.padEnd(Math.max(0, width + line.length - visibleWidth(line)));
+		lines.push(this.focused ? theme.bg("selectedBg", padded) : theme.bg("toolPanelBg", theme.fg("muted", padded)));
 		return lines;
 	}
 
@@ -97,17 +97,23 @@ export class SubagentSummaryLine implements Component, Focusable {
 		const overrideLabel = this.getOverrideLabel()?.trim();
 		const locationLabel = this.getLocationLabel()?.trim();
 		const contextLabel = this.getContextLabel()?.trim();
-		const left = overrideLabel || locationLabel || "";
-		if (!left && !contextLabel) return [];
+		if (!overrideLabel && !locationLabel && !contextLabel) return [];
+
 		const safeWidth = Math.max(1, width);
-		const right = contextLabel ?? "";
+		const brand =
+			safeWidth >= 58 ? `${theme.bold(theme.fg("accent", "OH MY PRIME"))}${theme.fg("borderMuted", "  │  ")}` : "";
+		const left = overrideLabel
+			? `${theme.fg("warning", "▲")} ${theme.fg("warning", overrideLabel)}`
+			: `${brand}${locationLabel ?? ""}`;
+		const right = contextLabel ? `${theme.fg("dim", "CTX")} ${theme.fg("muted", contextLabel)}` : "";
 		const gap = left && right ? 2 : 0;
 		const rightWidth = Math.min(visibleWidth(right), Math.max(0, safeWidth - gap));
 		const leftWidth = Math.max(0, safeWidth - rightWidth - gap);
-		const renderedLeft = truncateToWidth(left, leftWidth, "…");
-		const renderedRight = truncateToWidth(right, rightWidth, "…");
+		const renderedLeft = truncateToWidth(left, leftWidth, "…", true);
+		const renderedRight = truncateToWidth(right, rightWidth, "…", true);
 		const padding = Math.max(0, safeWidth - visibleWidth(renderedLeft) - visibleWidth(renderedRight));
-		return [theme.fg("muted", `${renderedLeft}${" ".repeat(padding)}${renderedRight}`)];
+		const content = `${renderedLeft}${" ".repeat(padding)}${renderedRight}`;
+		return [theme.bg("toolPanelBg", content)];
 	}
 
 	invalidate(): void {

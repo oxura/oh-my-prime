@@ -1,4 +1,4 @@
-import { Container, setKeybindings } from "@earendil-works/pi-tui";
+import { Container, setKeybindings, visibleWidth } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.js";
@@ -49,6 +49,8 @@ describe("InteractiveMode startup hints", () => {
 		const output = stripAnsi(lines.join("\n"));
 
 		expect(lines[0]).toBe("");
+		expect(output).toContain("OH MY PRIME");
+		expect(output).toContain("VERIFIED RECURSIVE AGENT RUNTIME");
 		expect(output).toContain("version  v0.0.0");
 		expect(output).toContain("model    test-model");
 		expect(output).toContain("cwd      /tmp/project");
@@ -63,6 +65,26 @@ describe("InteractiveMode startup hints", () => {
 			() => "/tmp/project",
 		);
 		expect(unpadded.render(120)[0]).not.toBe("");
+	});
+
+	it("keeps startup metadata readable in narrow terminals", () => {
+		const header = new BrandSplashHeader(
+			"0.0.0",
+			() => "test-model",
+			() => "/tmp/a/very/long/project/path",
+			undefined,
+			{ getStartHint: () => 'Try "refactor @<filepath>"' },
+		);
+
+		const lines = header.render(72);
+		const output = stripAnsi(lines.join("\n"));
+
+		expect(output).toContain("VERIFIED AGENT RUNTIME");
+		expect(output).not.toContain("VERIFIED RECURSIVE AGENT RUNTIM");
+		expect(output).not.toContain('Try "refactor');
+		for (const line of lines) {
+			expect(visibleWidth(line)).toBeLessThanOrEqual(72);
+		}
 	});
 
 	it("randomly selects from five concise filepath prompts", () => {

@@ -13,7 +13,7 @@ import {
 import type { IdleEvictionMinutes } from "../../../core/session-action-store.js";
 import type { WarningSettings } from "../../../core/settings-manager.js";
 import { getSelectListTheme, getSettingsListTheme, theme } from "../theme/theme.js";
-import { DynamicBorder } from "./dynamic-border.js";
+import { MenuPanel } from "./menu-panel.js";
 
 const SETTINGS_SUBMENU_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	minPrimaryColumnWidth: 12,
@@ -443,9 +443,6 @@ export class SettingsSelectorComponent extends Container {
 			values: ["true", "false"],
 		});
 
-		// Add borders
-		this.addChild(new DynamicBorder());
-
 		this.settingsList = new SettingsList(
 			items,
 			10,
@@ -517,8 +514,12 @@ export class SettingsSelectorComponent extends Container {
 			{ enableSearch: true },
 		);
 
-		this.addChild(this.settingsList);
-		this.addChild(new DynamicBorder());
+		const panel = new MenuPanel({
+			title: "Settings",
+			subtitle: "Runtime, interface, and verification preferences.",
+		});
+		panel.addChild(this.settingsList);
+		this.addChild(panel);
 	}
 
 	getSettingsList(): SettingsList {

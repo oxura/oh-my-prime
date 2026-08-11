@@ -2,9 +2,10 @@ import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/p
 import { theme } from "../theme/theme.js";
 
 export const TOOL_PANEL_PADDING_X = 2;
+const TOOL_PANEL_RAIL_WIDTH = 1;
 
 export function toolPanelContentWidth(width: number): number {
-	return Math.max(1, width - TOOL_PANEL_PADDING_X * 2);
+	return Math.max(1, width - TOOL_PANEL_RAIL_WIDTH * 2 - TOOL_PANEL_PADDING_X * 2);
 }
 
 /**
@@ -13,11 +14,14 @@ export function toolPanelContentWidth(width: number): number {
  * block.
  */
 export function toolPanelLine(line: string, width: number): string {
-	const contentWidth = toolPanelContentWidth(width);
+	const safeWidth = Math.max(1, width);
+	if (safeWidth <= 2) return theme.fg("borderMuted", "│".slice(0, safeWidth));
+	const contentWidth = toolPanelContentWidth(safeWidth);
 	const truncated = truncateToWidth(line, contentWidth, "");
 	const padding = " ".repeat(Math.max(0, contentWidth - visibleWidth(truncated)));
 	const sidePad = " ".repeat(TOOL_PANEL_PADDING_X);
-	return theme.bg("toolPanelBg", `${sidePad}${truncated}${padding}${sidePad}`);
+	const content = `${theme.fg("borderMuted", "│")}${sidePad}${truncated}${padding}${sidePad}${theme.fg("borderMuted", "│")}`;
+	return theme.bg("toolPanelBg", content);
 }
 
 /**

@@ -469,20 +469,20 @@ export class ToolExecutionComponent extends Container {
 
 	private panelHeader(): string {
 		const label = this.toolDefinition?.label ?? this.builtInToolDefinition?.label ?? this.toolName;
-		return `${theme.fg("muted", label)}${theme.fg("dim", " · ")}${this.panelStatus()}`;
+		return `${theme.bold(theme.fg("toolTitle", label))}${theme.fg("dim", " · ")}${this.panelStatus()}`;
 	}
 
 	private panelStatus(): string {
 		if (this.result && !this.isPartial) {
-			return this.result.isError ? theme.fg("error", "error") : theme.fg("success", "done");
+			return this.result.isError ? theme.fg("error", "error  ✕") : theme.fg("success", "done  ✓");
 		}
 		if (this.result?.isError) {
-			return theme.fg("error", "error");
+			return theme.fg("error", "error  ✕");
 		}
 		if (this.executionStarted) {
 			return theme.fg("bashMode", `${workingIconFrame(getWorkingPulseFrame())} running`);
 		}
-		return theme.fg("muted", "queued");
+		return theme.fg("muted", "queued  ○");
 	}
 
 	private getTextOutput(): string {
