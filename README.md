@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/prime-butterfly.svg">
-    <img src="assets/brand/prime-butterfly-black.svg" width="150" alt="Oh My Prime butterfly">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/oh-my-prime-proof-tree.svg">
+    <img src="assets/brand/oh-my-prime-proof-tree-black.svg" width="150" alt="Oh My Prime ProofTree mark">
   </picture>
 </p>
 
@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://github.com/oxura/oh-my-prime/actions/workflows/ci.yml"><img src="https://github.com/oxura/oh-my-prime/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-151a24.svg" alt="MIT license"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-151a24.svg" alt="GNU AGPL version 3 license"></a>
   <img src="https://img.shields.io/badge/Node.js-22%2B-43853d.svg" alt="Node.js 22 or newer">
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776ab.svg" alt="Python 3.10 or newer">
 </p>
@@ -318,6 +318,7 @@ Oh My Prime still works as a direct interactive coding agent. ProofTree is an es
 - Use `/model` or `/login` to configure authenticated providers.
 - Use `/settings` for runtime, interface, and verification preferences.
 - Use `/tree` and the agents view to navigate recursive session families.
+- Use `/license` to view the copyright, attribution, source, upstream-license, and warranty notices.
 - Use persistent goals, heartbeats, schedules, and autonomous mode for long-running work.
 - Ask the agent to use ProofTree for risky bugs, concurrency, migrations, broad refactors, security-sensitive changes, or ambiguous designs.
 
@@ -364,8 +365,10 @@ Oh My Prime focuses on the layer above that foundation: searching multiple imple
 
 ## Contributing
 
-Read the [development guide](packages/coding-agent/docs/development.md), keep changes focused, and run `npm run check` before submitting a pull request. Changes to verified runtime guarantees should include the focused regression coverage that demonstrates the claimed invariant.
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before submitting a pull request. External contributions require recorded acceptance of the [Individual Contributor License Agreement](CLA.md). Contributors retain copyright while granting the Project Owner broad copyright and patent rights, including sublicensing and relicensing rights.
 
 ## License
 
-Oh My Prime is released under the [MIT License](LICENSE).
+Oh My Prime original material is released under the [GNU Affero General Public License version 3](LICENSE), together with [section 7 attribution and origin terms](ADDITIONAL_TERMS.md). Interactive forks must preserve the visible Oh My Prime attribution, and network-modified versions must offer their complete Corresponding Source to users.
+
+Inherited Prime Agent and `pi` material retains its applicable [MIT terms](LICENSES/MIT.txt). See [`NOTICE`](NOTICE) for copyright and third-party attribution, and [`TRADEMARKS.md`](TRADEMARKS.md) for use of the Oh My Prime name and ProofTree mark.

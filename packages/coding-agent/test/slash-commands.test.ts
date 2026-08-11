@@ -21,6 +21,12 @@ describe("built-in slash commands", () => {
 		expect(commandNames).not.toContain("cron");
 	});
 
+	test("exposes the legal notice command", () => {
+		expect(BUILTIN_SLASH_COMMANDS.find((command) => command.name === "license")).toMatchObject({
+			description: "Show license, attribution, source, and warranty notices",
+		});
+	});
+
 	test("describes the fine-grained /rlm-max-depth semantics", () => {
 		expect(BUILTIN_SLASH_COMMANDS.find((command) => command.name === "rlm-max-depth")).toMatchObject({
 			description:

@@ -68,9 +68,9 @@ main() {
 	prime_agent_install_traps
 	prime_agent_init_screen
 	if [ "$prime_agent_screen_enabled" = 1 ]; then
-		prime_agent_screen "Installing Prime Agent" "" "" ""
+		prime_agent_screen "Installing Oh My Prime" "" "" ""
 	else
-		printf '\n\033[1m  Installing Prime Agent\033[0m\n\033[2m  npm global install\033[0m\n\n'
+		printf '\n\033[1m  Installing Oh My Prime\033[0m\n\033[2m  npm global install\033[0m\n\n'
 	fi
 
 	start_preflight_checks
@@ -115,21 +115,21 @@ main() {
 	prime_agent_download_dir=
 
 	if [ "${PRIME_AGENT_NODE_INSTALLED_STANDALONE:-0}" = 1 ]; then
-		prime_agent_screen "Prime Agent installed" "" "Checking your shell PATH." ""
+		prime_agent_screen "Oh My Prime installed" "" "Checking your shell PATH." ""
 		configure_standalone_node_path
 	elif command -v "$prime_agent_cmd" >/dev/null 2>&1; then
 		if [ "$prime_agent_screen_enabled" = 1 ]; then
-			prime_agent_screen "Prime Agent installed" "" "Run it with: $prime_agent_cmd" ""
+			prime_agent_screen "Oh My Prime installed" "" "Run it with: $prime_agent_cmd" ""
 		else
-			printf '\nPrime Agent was installed successfully.\n'
+			printf '\nOh My Prime was installed successfully.\n'
 			printf '\nRun it with: %s\n' "$prime_agent_cmd"
 		fi
 	else
 		if [ "$prime_agent_screen_enabled" = 1 ]; then
-			prime_agent_screen "Prime Agent installed" "" "PATH update needed for $prime_agent_cmd." ""
+			prime_agent_screen "Oh My Prime installed" "" "PATH update needed for $prime_agent_cmd." ""
 			prime_agent_restore_terminal
 		else
-			printf '\nPrime Agent was installed successfully.\n'
+			printf '\nOh My Prime was installed successfully.\n'
 		fi
 		cat <<EOF
 The $prime_agent_cmd command was installed, but it is not on your PATH yet.
@@ -338,7 +338,7 @@ prime_agent_render_screen() {
 }
 
 prime_agent_content_height() {
-	height=2
+	height=4
 	if prime_agent_show_logo; then
 		height=$((height + 15))
 	fi
@@ -388,6 +388,16 @@ prime_agent_content_line() {
 		else
 			prime_agent_set_blank_line
 		fi
+		return
+	fi
+
+	if [ "$index" -eq 2 ]; then
+		prime_agent_set_text_line "© 2026 Mansurshakh Japarov" "$prime_agent_color_dim"
+		return
+	fi
+
+	if [ "$index" -eq 3 ]; then
+		prime_agent_set_text_line "github.com/oxura/oh-my-prime" "$prime_agent_color_dim"
 		return
 	fi
 }
@@ -585,7 +595,7 @@ prime_agent_set_title_line() {
 	prime_agent_content_text=$(prime_agent_fit_ascii "$1" "$max_width")
 	prime_agent_content_width=${#prime_agent_content_text}
 	case "$prime_agent_content_text" in
-		*"Prime Agent"*)
+		*"Oh My Prime"*)
 			prime_agent_content_text=$(prime_agent_style_prime_agent_title "$prime_agent_content_text")
 			prime_agent_content_style=
 			;;
@@ -601,11 +611,11 @@ prime_agent_style_prime_agent_title() {
 	styled=
 	while :; do
 		case "$text" in
-			*"Prime Agent"*)
-				before=${text%%Prime Agent*}
-				rest=${text#*Prime Agent}
+			*"Oh My Prime"*)
+				before=${text%%Oh My Prime*}
+				rest=${text#*Oh My Prime}
 				styled="${styled}${prime_agent_bold}${prime_agent_color_primary}${before}"
-				styled="${styled}${prime_agent_bold}${prime_agent_color_primary}PRIME Agent${prime_agent_reset}"
+				styled="${styled}${prime_agent_bold}${prime_agent_color_primary}OH MY PRIME${prime_agent_reset}"
 				text="$rest"
 				;;
 			*)
@@ -897,16 +907,16 @@ run_preflight_checks() {
 	if command -v node >/dev/null 2>&1; then
 		node_version=$(node --version)
 		if ! node -e 'const [major, minor, patch] = process.versions.node.split(".").map(Number); process.exit(major > 20 || (major === 20 && (minor > 6 || (minor === 6 && patch >= 0))) ? 0 : 1)' >/dev/null; then
-			printf 'error: Prime Agent requires Node.js 20.6.0 or newer. Found %s.\n' "$node_version"
+			printf 'error: Oh My Prime requires Node.js 20.6.0 or newer. Found %s.\n' "$node_version"
 			status=1
 		fi
 	else
-		printf 'error: Node.js 20.6.0 or newer is required to install Prime Agent.\n'
+		printf 'error: Node.js 20.6.0 or newer is required to install Oh My Prime.\n'
 		status=1
 	fi
 
 	if ! command -v npm >/dev/null 2>&1; then
-		printf 'error: npm is required to install Prime Agent.\n'
+		printf 'error: npm is required to install Oh My Prime.\n'
 		status=1
 	fi
 
@@ -941,14 +951,14 @@ resolve_prime_agent_version() {
 	fi
 
 	if ! command -v curl >/dev/null 2>&1; then
-		printf 'error: curl is required to resolve the latest Prime Agent version.\n' >&2
+		printf 'error: curl is required to resolve the latest Oh My Prime version.\n' >&2
 		exit 1
 	fi
 
 	case "$release_channel" in
 		stable|beta) ;;
 		*)
-			printf 'error: invalid Prime Agent release channel: %s\n' "$release_channel" >&2
+			printf 'error: invalid Oh My Prime release channel: %s\n' "$release_channel" >&2
 			exit 1
 			;;
 	esac
@@ -961,13 +971,13 @@ resolve_prime_agent_version() {
 		"Checking the $release_channel release channel." \
 		curl -fsSL "$prime_agent_base_url/$release_channel" -o "$channel_path"; then
 		rm -rf "$channel_dir"
-		printf 'error: could not resolve latest Prime Agent version from %s/%s\n' "$prime_agent_base_url" "$release_channel" >&2
+		printf 'error: could not resolve latest Oh My Prime version from %s/%s\n' "$prime_agent_base_url" "$release_channel" >&2
 		exit 1
 	fi
 	channel_version="$(tr -d '[:space:]' <"$channel_path")"
 	rm -rf "$channel_dir"
 	if [ -z "$channel_version" ]; then
-		printf 'error: could not resolve latest Prime Agent version from %s/%s\n' "$prime_agent_base_url" "$release_channel" >&2
+		printf 'error: could not resolve latest Oh My Prime version from %s/%s\n' "$prime_agent_base_url" "$release_channel" >&2
 		exit 1
 	fi
 	normalize_version "$channel_version"
@@ -977,11 +987,11 @@ normalize_version() {
 	version="${1#v}"
 	case "$version" in
 		"")
-			printf 'error: empty Prime Agent version.\n' >&2
+			printf 'error: empty Oh My Prime version.\n' >&2
 			exit 1
 			;;
 		*[!0-9A-Za-z.-]*)
-			printf 'error: invalid Prime Agent version: %s\n' "$1" >&2
+			printf 'error: invalid Oh My Prime version: %s\n' "$1" >&2
 			exit 1
 			;;
 	esac
@@ -1003,7 +1013,7 @@ install_node_npm_interactive() {
 
 	if prime_agent_prompt_yes_no \
 		"Install Node.js and npm with $label?" \
-		"Required before Prime Agent can be installed." \
+		"Required before Oh My Prime can be installed." \
 		"Install? [Y/n]"; then
 		install_node_npm "$method" "$label"
 		return
@@ -1089,7 +1099,7 @@ install_node_npm() {
 Resolving Node.js packages.
 Downloading Node.js runtime.
 Installing npm.
-Preparing Prime Agent setup."
+Preparing Oh My Prime setup."
 		prime_agent_run_quiet_with_animation_steps \
 			"Installing Node.js and npm" \
 			"Installing Node.js and npm" \
@@ -1103,7 +1113,7 @@ Preparing Prime Agent setup."
 	fi
 	hash -r
 	if [ "$prime_agent_screen_enabled" = 1 ]; then
-		prime_agent_screen "Node.js and npm installed" "" "Continuing Prime Agent setup." ""
+		prime_agent_screen "Node.js and npm installed" "" "Continuing Oh My Prime setup." ""
 	else
 		printf '\nNode.js and npm are installed.\n\n'
 	fi
@@ -1314,7 +1324,7 @@ configure_standalone_node_path() {
 		case "$original_prime_agent_path" in
 			"$PRIME_AGENT_STANDALONE_NODE_BIN/"*)
 				if [ "$prime_agent_screen_enabled" = 1 ]; then
-					prime_agent_screen "Prime Agent installed" "" "Run it with: $prime_agent_cmd" ""
+					prime_agent_screen "Oh My Prime installed" "" "Run it with: $prime_agent_cmd" ""
 				else
 					printf '\nRun it with: %s\n' "$prime_agent_cmd"
 				fi
@@ -1322,14 +1332,14 @@ configure_standalone_node_path() {
 				;;
 		esac
 		if [ "$prime_agent_screen_enabled" = 1 ]; then
-			prime_agent_screen "Prime Agent installed" "" "PATH update needed for $prime_agent_cmd." ""
+			prime_agent_screen "Oh My Prime installed" "" "PATH update needed for $prime_agent_cmd." ""
 		else
 			printf '%s was installed, but your shell is not using that install yet.\n' "$prime_agent_cmd"
 			printf 'Your shell currently resolves %s to: %s\n' "$prime_agent_cmd" "$original_prime_agent_path"
 		fi
 	else
 		if [ "$prime_agent_screen_enabled" = 1 ]; then
-			prime_agent_screen "Prime Agent installed" "" "PATH update needed for $prime_agent_cmd." ""
+			prime_agent_screen "Oh My Prime installed" "" "PATH update needed for $prime_agent_cmd." ""
 		else
 			printf '%s was installed, but your shell is not using that install yet.\n' "$prime_agent_cmd"
 		fi
@@ -1346,7 +1356,7 @@ configure_standalone_node_path() {
 
 	if shell_profile_has_standalone_node_path "$profile"; then
 		if [ "$prime_agent_screen_enabled" = 1 ]; then
-			prime_agent_screen "Prime Agent installed" "" "Run: $(prime_agent_source_profile_command "$profile")" ""
+			prime_agent_screen "Oh My Prime installed" "" "Run: $(prime_agent_source_profile_command "$profile")" ""
 		else
 			printf '%s already contains %s.\n' "$profile" "$PRIME_AGENT_STANDALONE_NODE_BIN"
 			printf 'Restart your shell or run: %s\n' "$(prime_agent_source_profile_command "$profile")"
@@ -1422,11 +1432,11 @@ prompt_add_standalone_node_path() {
 
 	mkdir -p "$(dirname "$profile")"
 	{
-		printf '\n# Prime Agent standalone Node.js\n'
+		printf '\n# Oh My Prime standalone Node.js\n'
 		printf '%s\n' "$path_line"
 	} >>"$profile"
 	if [ "$prime_agent_screen_enabled" = 1 ]; then
-		prime_agent_screen "Prime Agent installed" "" "Run: $(prime_agent_source_profile_command "$profile")" ""
+		prime_agent_screen "Oh My Prime installed" "" "Run: $(prime_agent_source_profile_command "$profile")" ""
 	else
 		printf 'Added %s to %s.\n' "$PRIME_AGENT_STANDALONE_NODE_BIN" "$profile"
 		printf 'Restart your shell or run: %s\n' "$(prime_agent_source_profile_command "$profile")"
@@ -1462,19 +1472,19 @@ download_prime_agent_package() {
 	checksums_path="$download_dir/SHA256SUMS"
 
 	if ! command -v curl >/dev/null 2>&1; then
-		printf 'error: curl is required to download Prime Agent.\n' >&2
+		printf 'error: curl is required to download Oh My Prime.\n' >&2
 		exit 1
 	fi
 
 	prime_agent_run_quiet_with_animation \
 		"Downloading checksums" \
 		"Downloading release checksums" \
-		"Prime Agent v$version" \
+		"Oh My Prime v$version" \
 		curl -fsSL "$checksums_url" -o "$checksums_path"
 
 	prime_agent_run_quiet_with_animation \
-		"Downloading Prime Agent" \
-		"Downloading Prime Agent v$version" \
+		"Downloading Oh My Prime" \
+		"Downloading Oh My Prime v$version" \
 		"Fetching the verified package." \
 		curl -fsSL "$tarball_url" -o "$tarball_path"
 
@@ -1497,17 +1507,17 @@ verify_prime_agent_package_checksum() {
 	if command -v sha256sum >/dev/null 2>&1; then
 		prime_agent_run_quiet_with_animation \
 			"Verifying download" \
-			"Verifying Prime Agent download" \
+			"Verifying Oh My Prime download" \
 			"Checking SHA-256." \
 			prime_agent_run_checksum_check "$checksum_dir" "$(basename "$selected_checksums_path")" sha256sum
 	elif command -v shasum >/dev/null 2>&1; then
 		prime_agent_run_quiet_with_animation \
 			"Verifying download" \
-			"Verifying Prime Agent download" \
+			"Verifying Oh My Prime download" \
 			"Checking SHA-256." \
 			prime_agent_run_checksum_check "$checksum_dir" "$(basename "$selected_checksums_path")" shasum
 	else
-		printf 'error: sha256sum or shasum is required to verify the Prime Agent download.\n' >&2
+		printf 'error: sha256sum or shasum is required to verify the Oh My Prime download.\n' >&2
 		exit 1
 	fi
 }
@@ -1531,7 +1541,7 @@ confirm_install() {
 	tarball_url="$2"
 
 	if prime_agent_prompt_yes_no \
-		"Install Prime Agent v$version globally with npm?" \
+		"Install Oh My Prime v$version globally with npm?" \
 		"Downloads the verified release and runs npm install -g." \
 		"Install? [Y/n]"; then
 		return 0
@@ -1567,7 +1577,7 @@ confirm_kernel_runtime_setup() {
 
 	if prime_agent_prompt_yes_no \
 		"Prepare IPython runtime now?" \
-		"Installs uv, Python 3.11, ipykernel, and Prime Agent runtime." \
+		"Installs uv, Python 3.11, ipykernel, and Oh My Prime runtime." \
 		"Prepare? [Y/n]"; then
 		prime_agent_bootstrap_kernel_on_install=1
 		return
@@ -1600,8 +1610,8 @@ Preloading search tools.
 Preparing IPython kernel.
 Finalizing npm install."
 		prime_agent_run_quiet_with_animation_steps \
-			"Installing Prime Agent" \
-			"Installing Prime Agent" \
+			"Installing Oh My Prime" \
+			"Installing Oh My Prime" \
 			"$npm_install_details" \
 			env PRIME_AGENT_BOOTSTRAP_TOOLS_ON_INSTALL=1 PRIME_AGENT_BOOTSTRAP_KERNEL_ON_INSTALL=1 PRIME_AGENT_INSTALL_UV=1 npm install -g --no-fund --no-audit --loglevel=error --progress=false "$tarball_path"
 	else
@@ -1611,8 +1621,8 @@ Installing runtime packages.
 Preloading search tools.
 Finalizing npm install."
 		prime_agent_run_quiet_with_animation_steps \
-			"Installing Prime Agent" \
-			"Installing Prime Agent" \
+			"Installing Oh My Prime" \
+			"Installing Oh My Prime" \
 			"$npm_install_details" \
 			env PRIME_AGENT_BOOTSTRAP_TOOLS_ON_INSTALL=1 npm install -g --no-fund --no-audit --loglevel=error --progress=false "$tarball_path"
 	fi

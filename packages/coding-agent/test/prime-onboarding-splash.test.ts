@@ -32,6 +32,8 @@ describe("PrimeOnboardingSplashComponent", () => {
 		expect(lines).toHaveLength(36);
 		expect(output).toContain("OH MY PRIME");
 		expect(output).toContain("VERIFIED RECURSIVE AGENT RUNTIME");
+		expect(output).toContain("© 2026 Mansurshakh Japarov");
+		expect(output).toContain("github.com/oxura/oh-my-prime");
 		expect(output).toContain("Press Enter to connect a model");
 		expect(output).toContain("·");
 		expect(output).not.toContain("prime agent");

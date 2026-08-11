@@ -141,6 +141,8 @@ export class PrimeOnboardingSplashComponent implements Component {
 		lines.push({ left: 0, parts: [] });
 		lines.push(this.centerParts(this.formatBrandLine(), width));
 		lines.push(this.centerParts(this.formatTaglineLine(), width));
+		lines.push(this.centerParts([{ text: "© 2026 Mansurshakh Japarov", tone: "dim" }], width));
+		lines.push(this.centerParts([{ text: "github.com/oxura/oh-my-prime", tone: "dim" }], width));
 		lines.push({ left: 0, parts: [] });
 		lines.push(this.centerParts(this.formatContinueHint(), width));
 

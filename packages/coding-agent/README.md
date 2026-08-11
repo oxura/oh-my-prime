@@ -172,7 +172,8 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/reload` | Reload keybindings, extensions, skills, prompts, and context files (themes hot-reload automatically) |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/changelog` | Display version history |
-| `/quit` | Quit Prime Agent |
+| `/license` | Show license, attribution, source, upstream-license, and warranty notices |
+| `/quit` | Quit Oh My Prime |
 
 ### Keyboard Shortcuts
 

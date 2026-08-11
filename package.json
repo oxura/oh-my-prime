@@ -1,6 +1,8 @@
 {
 	"name": "prime-agent",
 	"private": true,
+	"author": "Mansurshakh Japarov",
+	"license": "AGPL-3.0-only",
 	"type": "module",
 	"workspaces": [
 		"packages/*",

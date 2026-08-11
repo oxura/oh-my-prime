@@ -126,6 +126,7 @@ const CANONICAL_BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{ name: "context", description: "Show token, cost, and context usage for agent and sub-agents" },
 	{ name: "changelog", description: "Show changelog entries" },
+	{ name: "license", description: "Show license, attribution, source, and warranty notices" },
 	{
 		name: "update",
 		description: `Update ${APP_NAME} and installed packages`,

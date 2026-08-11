@@ -435,6 +435,13 @@ export class BrandSplashHeader implements Component {
 			detailWidth >= visibleWidth("VERIFIED RECURSIVE AGENT RUNTIME")
 				? "VERIFIED RECURSIVE AGENT RUNTIME"
 				: "VERIFIED AGENT RUNTIME";
+		const copyrightNotice = "© 2026 Mansurshakh Japarov";
+		const sourceNotice = "github.com/oxura/oh-my-prime";
+		const combinedLegalNotice = `${copyrightNotice} · ${sourceNotice}`;
+		const legalNotice =
+			detailWidth >= visibleWidth(combinedLegalNotice)
+				? [theme.fg("dim", combinedLegalNotice)]
+				: [theme.fg("dim", copyrightNotice), theme.fg("dim", sourceNotice)];
 		const extraMetadata = this.options.getExtraMetadata?.() ?? [];
 		const hideStartHint = this.options.getHideStartHint?.() ?? false;
 		const startHint = this.options.getStartHint?.() ?? "Type a request to begin";
@@ -450,6 +457,7 @@ export class BrandSplashHeader implements Component {
 			labelled("version", `v${this.version}`),
 			labelled("model", this.getModelId() ?? "not selected"),
 			labelled("cwd", formatSplashCwd(this.getCwd())),
+			...legalNotice,
 			...extraMetadata.map((line) => labelled(line.label.toUpperCase(), line.value)),
 			...(hideStartHint || detailWidth < 36
 				? []
@@ -4752,6 +4760,12 @@ export class InteractiveMode {
 				if (commandName === "changelog" && !commandArgs) {
 					this.echoLocalCommand(text);
 					this.handleChangelogCommand();
+					this.editor.setText("");
+					return;
+				}
+				if (commandName === "license" && !commandArgs) {
+					this.echoLocalCommand(text);
+					this.handleLicenseCommand();
 					this.editor.setText("");
 					return;
 				}
@@ -9425,6 +9439,25 @@ export class InteractiveMode {
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Markdown(changelogMarkdown, 1, 1, this.getMarkdownThemeWithSettings()));
 		this.chatContainer.addChild(new DynamicBorder());
+		this.ui.requestRender();
+	}
+
+	private handleLicenseCommand(): void {
+		const lines = [
+			theme.bold(theme.fg("accent", "Oh My Prime Legal Notices")),
+			"",
+			"Powered by Oh My Prime",
+			"Copyright © 2026 Mansurshakh Japarov",
+			theme.fg("muted", "https://github.com/oxura/oh-my-prime"),
+			"",
+			`${theme.fg("dim", "License:")} GNU Affero General Public License version 3 only`,
+			`${theme.fg("dim", "Additional terms:")} visible attribution, origin marking, and trademark reservation`,
+			`${theme.fg("dim", "Upstream:")} Prime Agent and pi material retains its applicable MIT terms`,
+			"",
+			theme.fg("dim", "This program comes with no warranty. Use /license to view this notice again."),
+		];
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(lines.join("\n"), 1, 0));
 		this.ui.requestRender();
 	}
 

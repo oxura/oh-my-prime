@@ -5,6 +5,8 @@
 - Added the `ompr` command for launching Oh My Prime from source and release installs.
 - Changed the interactive terminal interface with a responsive Oh My Prime shell, clearer conversation and tool cards, surface-style menus, and a two-row session status footer.
 - Changed the startup, onboarding, and installer splashes to use an original Oh My Prime ProofTree mark instead of the upstream butterfly.
+- Changed Oh My Prime original material to AGPLv3 with visible attribution and network-source terms while preserving the inherited MIT notices.
+- Added a contributor license agreement, contribution policy, and trademark policy for external contributions and forks.
 - Fixed the source `ompr` launcher failing to resolve workspace packages when invoked outside the repository directory.
 - Added isolated Git workspaces with durable manifests, binary-safe diffs, stale-candidate detection, and hash-gated promotion.
 - Added commit-bound acceptance contracts, before/after reproducer gates, deterministic evidence ledgers, and verifier-gated promotion.

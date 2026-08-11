@@ -53,6 +53,8 @@ describe("InteractiveMode startup hints", () => {
 		expect(output).toContain("OH MY PRIME");
 		expect(output).toContain("VERIFIED RECURSIVE AGENT RUNTIME");
 		expect(output).toContain(OH_MY_PRIME_LOGO.split("\n")[0].trim());
+		expect(output).toContain("© 2026 Mansurshakh Japarov");
+		expect(output).toContain("github.com/oxura/oh-my-prime");
 		expect(output).toContain("version  v0.0.0");
 		expect(output).toContain("model    test-model");
 		expect(output).toContain("cwd      /tmp/project");
@@ -82,6 +84,8 @@ describe("InteractiveMode startup hints", () => {
 		const output = stripAnsi(lines.join("\n"));
 
 		expect(output).toContain("VERIFIED RECURSIVE AGENT RUNTIME");
+		expect(output).toContain("© 2026 Mansurshakh Japarov");
+		expect(output).toContain("github.com/oxura/oh-my-prime");
 		expect(output).not.toContain('Try "refactor');
 		for (const line of lines) {
 			expect(visibleWidth(line)).toBeLessThanOrEqual(72);
@@ -96,6 +100,22 @@ describe("InteractiveMode startup hints", () => {
 			expect(getRandomStartHint(() => index / START_HINTS.length)).toBe(hint);
 			expect(hint).toMatch(/^Try ".*@<filepath>.*"$/);
 		}
+	});
+
+	it("renders the required legal notices", () => {
+		const chatContainer = new Container();
+		const requestRender = vi.fn();
+		const mode = Object.assign(createMode(), { chatContainer, ui: { requestRender } });
+
+		Reflect.get(InteractiveMode.prototype, "handleLicenseCommand").call(mode);
+		const output = stripAnsi(chatContainer.render(100).join("\n"));
+
+		expect(output).toContain("Powered by Oh My Prime");
+		expect(output).toContain("Copyright © 2026 Mansurshakh Japarov");
+		expect(output).toContain("https://github.com/oxura/oh-my-prime");
+		expect(output).toContain("GNU Affero General Public License version 3 only");
+		expect(output).toContain("no warranty");
+		expect(requestRender).toHaveBeenCalledOnce();
 	});
 
 	it("places the fresh-chat shortcut hint after the model and effort", () => {

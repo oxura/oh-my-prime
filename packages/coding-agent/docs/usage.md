@@ -60,7 +60,8 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/reload` | Reload keybindings, extensions, skills, prompts, and context files |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/changelog` | Display version history |
-| `/quit` | Quit Prime Agent |
+| `/license` | Show license, attribution, source, upstream-license, and warranty notices |
+| `/quit` | Quit Oh My Prime |
 
 ## Message Queue
 

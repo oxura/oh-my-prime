@@ -210,6 +210,10 @@ function copyPackageContents(sourceDir, targetDir, packageJson) {
 	for (const entry of ["dist", "docs", "examples", "skills", "postinstall.cjs", "README.md", "CHANGELOG.md"]) {
 		copyIfExists(join(sourceDir, entry), join(targetDir, entry));
 	}
+
+	for (const entry of ["LICENSE", "ADDITIONAL_TERMS.md", "NOTICE", "TRADEMARKS.md", "LICENSES"]) {
+		copyIfExists(join(root, entry), join(targetDir, entry));
+	}
 }
 
 function run(command, args, cwd) {

@@ -39,7 +39,7 @@ print_render_meta() {
 }
 
 render_case() {
-	prime_agent_screen_title="Installing Prime Agent"
+	prime_agent_screen_title="Installing Oh My Prime"
 	prime_agent_screen_detail="Fetching the verified package."
 	prime_agent_screen_question=
 	prime_agent_screen_frame=1
@@ -82,13 +82,13 @@ screen_case() {
 	prime_agent_test_cols="$1"
 	prime_agent_test_rows="$2"
 	printf '__SCREEN_START__ first\\n' >&2
-	prime_agent_screen "Installing Prime Agent" "Installing Prime Agent" "Fetching the verified package." ""
+	prime_agent_screen "Installing Oh My Prime" "Installing Oh My Prime" "Fetching the verified package." ""
 	printf '__SCREEN_END__ first\\n' >&2
 
 	prime_agent_test_cols="$3"
 	prime_agent_test_rows="$4"
 	printf '__SCREEN_START__ second\\n' >&2
-	prime_agent_screen "Installing Prime Agent" "Installing Prime Agent" "Fetching the verified package." ""
+	prime_agent_screen "Installing Oh My Prime" "Installing Oh My Prime" "Fetching the verified package." ""
 	printf '__SCREEN_END__ second\\n' >&2
 }
 
@@ -98,7 +98,7 @@ Linking command binaries.
 Finalizing npm install."
 	for progress_frame in 1 24 25 48 49 200; do
 		prime_agent_animation_frame="$progress_frame"
-		printf '__PROGRESS__ %s\t%s\t%s\\n' "$progress_frame" "$(prime_agent_animation_status "Installing Prime Agent" "$progress_details" static)" "$(prime_agent_animation_detail "$progress_details")"
+		printf '__PROGRESS__ %s\t%s\t%s\\n' "$progress_frame" "$(prime_agent_animation_status "Installing Oh My Prime" "$progress_details" static)" "$(prime_agent_animation_detail "$progress_details")"
 	done
 }
 
@@ -116,6 +116,22 @@ try {
 	const stableVisible = runCase("stable visible logo", 100, 30, 90, 30);
 	check(stableVisible.meta.first.visible === "1", "expected the initial large render to show the logo");
 	check(stableVisible.meta.second.visible === "1", "expected a safe resize to keep showing the logo");
+	check(
+		stableVisible.renders.first.join("\n").includes("© 2026 Mansurshakh Japarov"),
+		"expected the installer to display the copyright notice",
+	);
+	check(
+		stableVisible.renders.first.join("\n").includes("github.com/oxura/oh-my-prime"),
+		"expected the installer to display the canonical source",
+	);
+	check(
+		stableVisible.renders.first.join("\n").includes("OH MY PRIME"),
+		"expected the installer to use the Oh My Prime product name",
+	);
+	check(
+		!stableVisible.renders.first.join("\n").includes("Installing Prime Agent"),
+		"expected the installer not to use the upstream product name",
+	);
 	check(
 		stableVisible.meta.first.lab_width === stableVisible.meta.second.lab_width,
 		"expected logo lab width to stay stable across a safe resize",
@@ -254,7 +270,7 @@ function assertInstallerProgress(progress) {
 			`expected progress sample ${index + 1} to show "${expectedDetail}", got "${progress[index].detail}"`,
 		);
 		check(
-			progress[index].status === "Installing Prime Agent...",
+			progress[index].status === "Installing Oh My Prime...",
 			`expected progress sample ${index + 1} to use indeterminate status`,
 		);
 		check(!progress[index].status.includes("%"), `expected progress sample ${index + 1} not to include a percent`);
